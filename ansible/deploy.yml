@@ -1,0 +1,26 @@
+---
+# Executado na VM de monitoramento, que usa a própria identidade (instance
+# principal) — nenhuma credencial é distribuída.
+#
+#   ansible-playbook deploy.yml -e image_action=release
+#   ansible-playbook deploy.yml -e canary_action=up
+#   ansible-playbook deploy.yml -e canary_action=shift -e canary_percent=25
+#   ansible-playbook deploy.yml -e canary_action=promote
+#   ansible-playbook deploy.yml -e image_action=prune
+- name: Imagem
+  hosts: role_monitoring
+  become: true
+  gather_facts: true
+  roles:
+    - role: app_image
+      when: image_action is defined
+  tags: [image]
+
+- name: Canário
+  hosts: role_monitoring
+  become: true
+  gather_facts: true
+  roles:
+    - role: app_canary
+      when: canary_action is defined
+  tags: [canary]

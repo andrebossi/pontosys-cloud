@@ -1,0 +1,13 @@
+route:
+  receiver: default
+  group_by: [alertname, app]
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  routes:
+    - matchers: [severity="critical"]
+      receiver: default
+      repeat_interval: 1h
+
+receivers:
+  - name: default

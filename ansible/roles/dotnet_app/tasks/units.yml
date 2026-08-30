@@ -1,0 +1,68 @@
+---
+- name: Applications user
+  ansible.builtin.user:
+    name: dotnetapp
+    system: true
+    shell: /usr/sbin/nologin
+    home: /srv/apps
+    create_home: false
+
+- name: Base directories
+  ansible.builtin.file:
+    path: "{{ item.p }}"
+    state: directory
+    owner: "{{ item.o | default('root') }}"
+    group: "{{ item.g | default('root') }}"
+    mode: "{{ item.m | default('0755') }}"
+  loop:
+    - { p: /srv/apps, o: dotnetapp, g: dotnetapp }
+    - { p: /etc/dotnet-apps, g: dotnetapp, m: "0750" }
+    - { p: /var/lib/dotnet-dumps, o: dotnetapp, g: dotnetapp }
+
+- name: Directory per application
+  ansible.builtin.file:
+    path: "/srv/apps/{{ item }}"
+    state: directory
+    owner: dotnetapp
+    group: dotnetapp
+    mode: "0755"
+  loop: "{{ applications.keys() | list }}"
+
+- name: Group slice
+  ansible.builtin.template:
+    src: apps.slice.j2
+    dest: /etc/systemd/system/apps.slice
+    mode: "0644"
+  notify: reload systemd
+
+- name: Unit template
+  ansible.builtin.template:
+    src: dotnet-app@.service.j2
+    dest: /etc/systemd/system/dotnet-app@.service
+    mode: "0644"
+  notify: reload systemd
+
+# A drop-in per app instead of editing the template: `systemctl cat` shows
+# where each limit came from, and changing one app doesn't touch the others.
+- name: Drop-in directory per application
+  ansible.builtin.file:
+    path: "/etc/systemd/system/dotnet-app@{{ item }}.service.d"
+    state: directory
+    mode: "0755"
+  loop: "{{ applications.keys() | list }}"
+
+- name: Per-application limits drop-in
+  ansible.builtin.template:
+    src: limits.conf.j2
+    dest: "/etc/systemd/system/dotnet-app@{{ item.key }}.service.d/10-limits.conf"
+    mode: "0644"
+  loop: "{{ applications | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  notify:
+    - reload systemd
+    - restart apps
+
+- name: Valid unit
+  ansible.builtin.command: systemd-analyze verify /etc/systemd/system/dotnet-app@.service
+  changed_when: false

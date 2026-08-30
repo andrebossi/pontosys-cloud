@@ -1,0 +1,12 @@
+---
+# Only what's common to EVERY VM. Fluent Bit's base collection lives in
+# roles/observability_agent/defaults; whatever is role-specific goes in
+# role_<role>.yml.
+label_prefix: pscloud
+oci_region: sa-saopaulo-1
+compartment_ocid: "{{ lookup('env', 'OCI_COMPARTMENT_OCID') }}"
+vault_ocid: "{{ lookup('env', 'OCI_VAULT_OCID') }}"
+
+monitoring_private_ip: "{{ groups['role_monitoring'] | first | default('') }}"
+
+swap_size: 2G

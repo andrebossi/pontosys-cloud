@@ -1,0 +1,85 @@
+---
+- name: Stack directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner | default('root') }}"
+    mode: "{{ item.mode | default('0750') }}"
+  loop:
+    - path: "{{ observability_dir }}"
+    # 472 is the grafana-oss uid in the official image; the bind mount needs
+    # to be writable by it for file-based logging to work.
+    - path: "{{ grafana_log_dir }}"
+      owner: "472"
+      mode: "0755"
+
+- name: Compose, alerts and provisioning
+  ansible.builtin.copy:
+    src: observability/
+    dest: "{{ observability_dir }}/"
+    mode: "0644"
+    directory_mode: "0755"
+  notify: restart observability
+
+- name: grafana.ini
+  ansible.builtin.template:
+    src: grafana.ini.j2
+    dest: "{{ observability_dir }}/grafana.ini"
+    mode: "0644"
+  notify: restart observability
+
+# All sizing (retention, disk ceiling, memory and CPU limits) lives here. The
+# docker-compose.yml stays generic and runs the same on any host.
+- name: Backend budget
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ observability_dir }}/.env"
+    mode: "0600"
+  no_log: true
+  notify: restart observability
+
+- name: Grafana fail2ban filter
+  ansible.builtin.copy:
+    src: grafana-local.conf
+    dest: /etc/fail2ban/filter.d/grafana-local.conf
+    mode: "0644"
+  notify: restart fail2ban
+
+- name: Valid compose file
+  ansible.builtin.command:
+    cmd: docker compose config --quiet
+    chdir: "{{ observability_dir }}"
+  changed_when: false
+
+- name: Bring the stack up
+  community.docker.docker_compose_v2:
+    project_src: "{{ observability_dir }}"
+    state: present
+    wait: true
+
+- name: Backends responding
+  ansible.builtin.uri:
+    url: "{{ item }}"
+    status_code: 200
+  loop:
+    - http://127.0.0.1:8428/health
+    - http://127.0.0.1:9428/health
+    - http://127.0.0.1:3000/api/health
+  register: backend_health
+  retries: 18
+  delay: 10
+  until: backend_health is succeeded
+  changed_when: false
+
+# `docker compose ps` says the container came up; only the cgroup says the
+# limit was actually applied. Without this, a syntax error in .env would
+# leave the backends unbounded and the whole VM exposed to an OOM.
+- name: Memory limits actually applied
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      docker inspect $(docker compose ps -q) --format '{{ '{{' }}.Name{{ '}}' }} {{ '{{' }}.HostConfig.Memory{{ '}}' }}'
+      | awk '$2 == 0 {print "NO LIMIT: " $1; bad=1} END {exit bad+0}'
+    chdir: "{{ observability_dir }}"
+    executable: /bin/bash
+  changed_when: false

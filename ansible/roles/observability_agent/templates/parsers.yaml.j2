@@ -1,0 +1,26 @@
+# {{ ansible_managed }}
+parsers:
+  # Casa com o log_format json_analytics do nginx_app.
+  - name: nginx_json
+    format: json
+    time_key: t
+    time_format: "%Y-%m-%dT%H:%M:%S%z"
+    time_keep: true
+
+  # 2026/08/19 16:49:03 [error] 1234#1234: *55 connect() failed (111: Connection
+  # refused) while connecting to upstream, client: 10.20.16.5, ...
+  - name: nginx_error
+    format: regex
+    regex: '^(?<time>\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}) \[(?<level>[a-z]+)\] (?<pid>\d+)#(?<tid>\d+): (?<message>.*)$'
+    time_key: time
+    time_format: "%Y/%m/%d %H:%M:%S"
+    time_keep: true
+
+
+  # Kestrel/.NET com "Logging:Console:FormatterName": "json".
+  - name: dotnet_json
+    format: json
+    time_key: Timestamp
+    time_format: "%Y-%m-%dT%H:%M:%S.%L%z"
+    time_keep: true
+

@@ -1,0 +1,33 @@
+---
+# Imagem dourada da camada de aplicação. Executado pelo Packer dentro da
+# instância temporária -- não contra a frota.
+#
+# O que sai daqui é uma imagem sem segredo e sem estado de máquina. Quem a
+# coloca em uso é o driver `image release` (roles/app_image), que roda na VM de
+# monitoramento com a identidade dela.
+- name: Golden image for the application layer
+  hosts: default
+  become: true
+  roles:
+    - base
+    - dotnet_runtime
+    - nginx_app
+    - observability_agent
+
+  post_tasks:
+    # Only units and directories. Tasks that read secrets from Vault are
+    # deliberately left out: the image is shared across the whole fleet.
+    - name: Units and limits per application
+      ansible.builtin.include_role:
+        name: dotnet_app
+        tasks_from: units.yml
+
+    - name: Clean up state before turning into an image
+      ansible.builtin.shell:
+        cmd: |
+          rm -rf /var/lib/fluent-bit/*.db /var/lib/fluent-bit/storage/*
+          rm -f /etc/machine-id && touch /etc/machine-id
+          cloud-init clean --logs || true
+          truncate -s 0 /var/log/*.log || true
+        executable: /bin/bash
+      changed_when: true

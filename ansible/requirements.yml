@@ -1,0 +1,14 @@
+---
+collections:
+  - name: nginxinc.nginx_core
+    version: ">=0.8.0"
+  - name: oracle.oci
+  - name: community.general
+  - name: community.docker
+  - name: ansible.posix
+
+roles:
+  - name: geerlingguy.docker
+    version: 8.0.0
+  - name: robertdebock.fail2ban
+    version: 5.0.6

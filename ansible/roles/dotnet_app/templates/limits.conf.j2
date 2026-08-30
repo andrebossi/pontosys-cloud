@@ -1,0 +1,20 @@
+# {{ ansible_managed }}
+{% set t = app_tiers[item.value.tier] %}
+[Service]
+# MemoryHigh is a SOFT ceiling: once crossed, the kernel applies reclaim
+# pressure and throttles the app instead of killing it -- this is the range
+# where .NET's GC has time to react.
+# MemoryMax is the HARD ceiling. Keeping distance between the two is what
+# prevents OOM.
+MemoryMin={{ item.value.memory_min | default(t.memory_min) }}
+MemoryHigh={{ item.value.memory_high | default(t.memory_high) }}
+MemoryMax={{ item.value.memory_max | default(t.memory_max) }}
+MemorySwapMax={{ item.value.memory_swap_max | default(t.memory_swap_max) }}
+
+# CPUQuota is mandatory: without it the kernel never fills in throttled_usec
+# in cpu.stat and app_cpu_throttled_pct stays at zero forever.
+CPUQuota={{ item.value.cpu_quota | default(t.cpu_quota) }}
+# CPUWeight is what decides the order under contention -- it's the parameter
+# that stops reports from getting in the way of payments.
+CPUWeight={{ item.value.cpu_weight | default(t.cpu_weight) }}
+IOWeight={{ item.value.io_weight | default(t.io_weight) }}

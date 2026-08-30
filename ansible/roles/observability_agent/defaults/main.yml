@@ -1,0 +1,87 @@
+---
+fluentbit_config_dir: /etc/fluent-bit
+fluentbit_state_dir: /var/lib/fluent-bit
+fluentbit_textfile_dir: /var/lib/node_exporter/textfile
+fluentbit_memory_max: 96M
+fluentbit_cpu_quota: 15%
+
+# Administration endpoint. Besides /api/v1/health and its own metrics, this is
+# also where the hot reload comes in: POST /api/v2/reload swaps the
+# configuration without killing the process, so changing collection doesn't
+# lose the on-disk buffer or open a gap in the series.
+fluentbit_http_port: 2020
+
+# A single list per type. Whatever belongs to the role goes into
+# fluentbit_extra_* in group_vars and is CONCATENATED here -- Ansible replaces
+# same-named lists between groups, and the loss would be silent.
+fluentbit_extra_inputs: []
+fluentbit_extra_filters: []
+fluentbit_extra_outputs: []
+fluentbit_extra_files: []
+textfile_exporters: []
+
+# Collection common to every VM: host (errors and OOM), host and agent metrics.
+fluentbit_base_inputs:
+- name: node_exporter_metrics
+  tag: node_metrics
+  scrape_interval: 30
+  metrics: cpu,meminfo,diskstats,filesystem,loadavg,vmstat,systemd,textfile
+  collector.textfile.path: /var/lib/node_exporter/textfile
+  collector.textfile.scrape_interval: 30
+  systemd_include_pattern: (dotnet-app@.+\.service|nginx\.service|fluent-bit\.service|docker\.service)
+  systemd_service_restart_metrics: true
+  systemd_unit_start_time_metrics: true
+  diskstats.ignore_device_regex: ^(ram|loop|fd|dm-)\d+$
+  filesystem.ignore_mount_point_regex: ^/(dev|proc|sys|run|var/lib/docker/.+)($|/)
+  threaded: 'on'
+- name: fluentbit_metrics
+  tag: fb_metrics
+  scrape_interval: 30
+- name: systemd
+  tag: host.err
+  systemd_filter:
+  - PRIORITY=0
+  - PRIORITY=1
+  - PRIORITY=2
+  - PRIORITY=3
+  - _SYSTEMD_UNIT=systemd-oomd.service
+  systemd_filter_type: or
+  strip_underscores: true
+  read_from_tail: true
+  max_entries: 500
+  db: /var/lib/fluent-bit/systemd-host.db
+  storage.type: filesystem
+  threaded: 'on'
+fluentbit_base_filters:
+- name: record_modifier
+  match: '*'
+  record:
+  - instance_id ${INSTANCE_ID}
+  - instance_name ${INSTANCE_NAME}
+  - fault_domain ${FD}
+  - role ${ROLE}
+  - pool ${POOL}
+fluentbit_base_outputs:
+- name: prometheus_remote_write
+  match_regex: ^(node_metrics|fb_metrics|nginx_metrics|nginx_req_metrics|backend_metrics)$
+  host: '{{ monitoring_private_ip }}'
+  port: 8428
+  uri: /api/v1/write
+  add_label:
+  - instance ${INSTANCE_ID}
+  - fault_domain ${FD}
+  - pool ${POOL}
+  - job oci-${ROLE}
+  retry_limit: 5
+  storage.total_limit_size: 256M
+- name: loki
+  match: host.err
+  host: '{{ monitoring_private_ip }}'
+  port: 9428
+  uri: /insert/loki/api/v1/push
+  labels: job=host,instance=${INSTANCE_NAME},fd=${FD},pool=${POOL}
+  label_keys: $unit
+  line_format: json
+  remove_keys: BOOT_ID,MACHINE_ID,CAP_EFFECTIVE,SYSTEMD_CGROUP,SYSTEMD_INVOCATION_ID,SOURCE_REALTIME_TIMESTAMP,SELINUX_CONTEXT,AUDIT_SESSION,AUDIT_LOGINUID,STREAM_ID,SYSLOG_FACILITY
+  retry_limit: 5
+  storage.total_limit_size: 512M

@@ -1,0 +1,30 @@
+# {{ ansible_managed }}
+[Unit]
+Description=Fluent Bit (log and metrics agent)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=fluent-bit
+Group=systemd-journal
+# adm: required to read /var/log/nginx/*.log and /var/log/mysql/*.log
+# (0640 root:adm). Without this the tail inputs fail with permission denied.
+SupplementaryGroups=adm
+Restart=always
+RestartSec=5
+
+ExecStartPre=/usr/bin/mkdir -p {{ fluentbit_state_dir }}/storage
+# Rewrites /run/instance.env on every start: if the VM changed fault domain
+# during a live migration, the label follows along.
+ExecStartPre=/usr/local/bin/oci-instance-label.sh
+EnvironmentFile=-/run/instance.env
+ExecStart=/opt/fluent-bit/bin/fluent-bit -c {{ fluentbit_config_dir }}/fluent-bit.yaml
+
+MemoryMax={{ fluentbit_memory_max }}
+CPUQuota={{ fluentbit_cpu_quota }}
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths={{ fluentbit_state_dir }} {{ fluentbit_textfile_dir }} /run
+
+[Install]
+WantedBy=multi-user.target

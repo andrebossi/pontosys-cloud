@@ -1,0 +1,29 @@
+---
+dependencies:
+  - role: geerlingguy.docker
+    vars:
+      docker_install_compose_plugin: true
+      docker_install_compose: false
+      docker_users: []
+
+  - role: robertdebock.fail2ban
+    vars:
+      fail2ban_bantime: 1h
+      fail2ban_findtime: 10m
+      fail2ban_maxretry: 5
+      fail2ban_loglevel: INFO
+      fail2ban_services:
+        - name: sshd
+          enabled: true
+          port: ssh
+          logpath: "%(sshd_log)s"
+          backend: "%(sshd_backend)s"
+          maxretry: 4
+        - name: grafana
+          enabled: true
+          port: http,https
+          filter: grafana-local
+          logpath: "{{ grafana_log_dir }}/grafana.log"
+          maxretry: 5
+          findtime: 10m
+          bantime: 1h

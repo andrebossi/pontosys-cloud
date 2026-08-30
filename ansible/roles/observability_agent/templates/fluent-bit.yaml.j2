@@ -1,0 +1,31 @@
+# {{ ansible_managed }}
+# Generated from group_vars. To add a collection, add a dictionary to
+# fluentbit_extra_inputs / _filters / _outputs -- no task changes.
+service:
+  flush: 5
+  log_level: info
+  parsers_file: parsers.yaml
+  http_server: "on"
+  http_listen: 127.0.0.1
+  http_port: {{ fluentbit_http_port }}
+  health_check: "on"
+  hc_errors_count: 5
+  hc_retry_failure_count: 5
+  hc_period: 60
+  hot_reload: "on"
+  storage.path: {{ fluentbit_state_dir }}/storage
+  storage.sync: normal
+  storage.checksum: "off"
+  storage.backlog.mem_limit: 16M
+  storage.max_chunks_up: 64
+  storage.metrics: "on"
+  scheduler.base: 5
+  scheduler.cap: 300
+
+pipeline:
+  inputs:
+{{ (fluentbit_base_inputs + fluentbit_extra_inputs) | to_nice_yaml(indent=2) | indent(4, true) }}
+  filters:
+{{ (fluentbit_base_filters + fluentbit_extra_filters) | to_nice_yaml(indent=2) | indent(4, true) }}
+  outputs:
+{{ (fluentbit_base_outputs + fluentbit_extra_outputs) | to_nice_yaml(indent=2) | indent(4, true) }}

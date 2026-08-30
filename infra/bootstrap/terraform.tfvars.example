@@ -1,0 +1,3 @@
+home_region    = "sa-saopaulo-1"
+compartment_id = "ocid1.compartment.oc1..CHANGEME"
+label_prefix   = "pscloud"

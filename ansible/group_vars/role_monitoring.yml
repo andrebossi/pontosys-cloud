@@ -1,0 +1,103 @@
+---
+# ===========================================================================
+# MONITORING VM — runs the observability-backend in Docker Compose.
+# The only host with a public IP; also acts as jump host and Ansible executor.
+# ===========================================================================
+observability_dir: /opt/observability
+grafana_log_dir: /var/log/grafana
+
+# ---------------------------------------------------------------------------
+# 60 GB BUDGET FOR THE BACKENDS
+#
+#   VictoriaMetrics   20 GB   (-storage.maxDiskSpaceUsageBytes)
+#   VictoriaLogs      30 GB   (-retention.maxDiskSpaceUsageBytes)
+#   headroom          10 GB   merge/compaction needs free space; without
+#                             headroom the VM enters read-only mode
+# ---------------------------------------------------------------------------
+vm_max_disk: 20GB
+vm_retention: 3m
+vl_max_disk: 30GB
+vl_retention: 30d
+
+# ---------------------------------------------------------------------------
+# MEMORY BUDGET — 8 GB VM
+#
+#   containers  ~2.5 GB  (limits below)
+#   OS + fluent-bit + nginx + docker  ~0.8 GB
+#   = ~4.7 GB free for page cache, which is what VictoriaMetrics and
+#     VictoriaLogs rely on the most (mmap-based storage).
+#
+# -memory.allowedBytes is MANDATORY on both: the default (-memory.allowedPercent
+# 60) is computed against the HOST's RAM, not the container's limit. Inside a
+# 1 GB container the process would think it can use 4.8 GB and get killed by
+# the cgroup's OOM killer.
+# ---------------------------------------------------------------------------
+vm_mem_limit: 1G
+vm_mem_allowed: 700MB
+vm_cpus: "0.6"
+vm_max_queries: 4
+
+vl_mem_limit: 800M
+vl_mem_allowed: 550MB
+vl_cpus: "0.5"
+
+vmalert_mem_limit: 128M
+alertmanager_mem_limit: 128M
+grafana_mem_limit: 400M
+
+# monitoring_fqdn: grafana.example.com
+# grafana_admin_password: set this in host_vars with Ansible Vault.
+
+# ---------------------------------------------------------------------------
+# The monitoring VM monitors itself, and monitors its own backends.
+# Without this, the day VictoriaMetrics fills up the disk is the day
+# nobody finds out about anything.
+# ---------------------------------------------------------------------------
+fluentbit_extra_inputs:
+  - name: prometheus_scrape
+    tag: backend_metrics
+    host: 127.0.0.1
+    port: 8428
+    metrics_path: /metrics
+    scrape_interval: 60s
+
+  - name: prometheus_scrape
+    tag: backend_metrics
+    host: 127.0.0.1
+    port: 9428
+    metrics_path: /metrics
+    scrape_interval: 60s
+
+  - name: prometheus_scrape
+    tag: backend_metrics
+    host: 127.0.0.1
+    port: 8880
+    metrics_path: /metrics
+    scrape_interval: 60s
+
+fluentbit_extra_filters:
+  # A single VictoriaMetrics /metrics endpoint yields ~1500 series. Keeping all
+  # of them would make the backend spend more space on itself than on the
+  # fleet. Only the ones that answer "is the backend up, does it have disk,
+  # and is it ingesting" are kept here.
+  - name: metrics_selector
+    match: backend_metrics
+    metric_name: |
+      /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
+    action: include
+
+fluentbit_extra_outputs:
+  # On this VM the destination is local: sending to 127.0.0.1 avoids depending
+  # on the very network being observed.
+  - name: loki
+    match: host.err
+    host: 127.0.0.1
+    port: 9428
+    uri: /insert/loki/api/v1/push
+    labels: job=host,instance=${INSTANCE_NAME},fd=${FD}
+    label_keys: $unit
+    line_format: json
+    retry_limit: 5
+    storage.total_limit_size: 256M
+
+monitoring_private_ip: 127.0.0.1

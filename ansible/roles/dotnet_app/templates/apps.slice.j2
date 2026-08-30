@@ -1,0 +1,25 @@
+# {{ ansible_managed }}
+[Unit]
+Description=.NET applications slice
+Before=slices.target
+
+# Ceiling for the WHOLE GROUP. The per-app limit stops any single one from
+# exploding; this one stops all 9, each within their own limit, from adding
+# up to more than the VM has.
+# It also gives the collection its identity: Fluent Bit's systemd input
+# filters on _SYSTEMD_SLICE=apps.slice and the cgroup exporter scans
+# /sys/fs/cgroup/apps.slice/dotnet-app@*.service.
+
+[Slice]
+MemoryAccounting=yes
+MemoryHigh={{ apps_slice_memory_high }}
+MemoryMax={{ apps_slice_memory_max }}
+MemorySwapMax={{ apps_slice_memory_swap_max }}
+
+CPUAccounting=yes
+CPUQuota={{ apps_slice_cpu_quota }}
+CPUWeight=100
+
+IOAccounting=yes
+IOWeight=100
+TasksMax=2048

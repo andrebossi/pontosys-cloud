@@ -1,0 +1,20 @@
+---
+- name: Common base
+  hosts: all
+  become: true
+  roles:
+    - base
+    - observability_agent
+
+- name: Applications
+  hosts: role_app
+  become: true
+  roles:
+    - nginx_app
+    - dotnet_app
+
+- name: Observability stack
+  hosts: role_monitoring
+  become: true
+  roles:
+    - monitoring_stack

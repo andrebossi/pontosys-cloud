@@ -1,0 +1,16 @@
+---
+# Hot reload swaps the configuration without restarting: the on-disk buffer
+# survives and no gap opens in the series. Only a unit change requires a real restart.
+- name: reload fluent-bit
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ fluentbit_http_port }}/api/v2/reload"
+    method: POST
+    status_code: [200, 204]
+  failed_when: false
+  changed_when: true
+
+- name: restart fluent-bit
+  ansible.builtin.systemd:
+    name: fluent-bit
+    state: restarted
+    daemon_reload: true

@@ -1,0 +1,143 @@
+name: pscloud-observability
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  victoriametrics:
+    <<: *common
+    image: victoriametrics/victoria-metrics:v1.111.0
+    volumes:
+      - vm-data:/storage
+    command:
+      - --storageDataPath=/storage
+      - --httpListenAddr=:8428
+      - --retentionPeriod=${VM_RETENTION:-3m}
+      - --storage.maxDiskSpaceUsageBytes=${VM_MAX_DISK:-20GB}
+      # Mandatory. The default is -memory.allowedPercent=60, computed against the
+      # HOST's RAM -- inside a container limited to 1G this would make the VM
+      # think it can use 4.8G and get killed by the cgroup's OOM killer.
+      - --memory.allowedBytes=${VM_MEM_ALLOWED:-700MB}
+      - --search.maxConcurrentRequests=${VM_MAX_QUERIES:-4}
+      - --search.maxQueryDuration=30s
+      - --dedup.minScrapeInterval=15s
+      - --selfScrapeInterval=30s
+      - --loggerLevel=WARN
+    ports:
+      - "127.0.0.1:8428:8428"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${VM_MEM_LIMIT:-1G}
+          cpus: "${VM_CPUS:-0.6}"
+
+  victorialogs:
+    <<: *common
+    image: victoriametrics/victoria-logs:v1.9.1-victorialogs
+    volumes:
+      - vl-data:/storage
+    command:
+      - --storageDataPath=/storage
+      - --httpListenAddr=:9428
+      - --retentionPeriod=${VL_RETENTION:-30d}
+      - --retention.maxDiskSpaceUsageBytes=${VL_MAX_DISK:-30GB}
+      - --memory.allowedBytes=${VL_MEM_ALLOWED:-550MB}
+      - --insert.maxFieldsPerLine=200
+      - --loggerLevel=WARN
+    ports:
+      - "127.0.0.1:9428:9428"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: ${VL_MEM_LIMIT:-800M}
+          cpus: "${VL_CPUS:-0.5}"
+
+  vmalert:
+    <<: *common
+    image: victoriametrics/vmalert:v1.111.0
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+    volumes:
+      - ./alerts:/etc/alerts:ro
+    command:
+      - --datasource.url=http://victoriametrics:8428
+      - --remoteWrite.url=http://victoriametrics:8428
+      - --remoteRead.url=http://victoriametrics:8428
+      - --notifier.url=http://alertmanager:9093
+      # One glob per folder: alerts/app, alerts/host, alerts/monitoring.
+      - --rule=/etc/alerts/app/*.yml
+      - --rule=/etc/alerts/host/*.yml
+      - --rule=/etc/alerts/monitoring/*.yml
+      - --evaluationInterval=30s
+      - --external.label=env=${ENV_NAME:-prod}
+      - --loggerLevel=WARN
+    ports:
+      - "127.0.0.1:8880:8880"
+    deploy:
+      resources:
+        limits:
+          memory: ${VMALERT_MEM_LIMIT:-128M}
+          cpus: "0.2"
+
+  alertmanager:
+    <<: *common
+    image: prom/alertmanager:v0.28.0
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - am-data:/alertmanager
+    ports:
+      - "127.0.0.1:9093:9093"
+    deploy:
+      resources:
+        limits:
+          memory: ${AM_MEM_LIMIT:-128M}
+          cpus: "0.1"
+
+  grafana:
+    <<: *common
+    image: grafana/grafana-oss:11.6.1
+    depends_on:
+      victoriametrics:
+        condition: service_healthy
+      victorialogs:
+        condition: service_started
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-provisioning:/etc/grafana/provisioning:ro
+      - ./grafana.ini:/etc/grafana/grafana.ini:ro
+      # File-based log on the host: this is what fail2ban reads from.
+      - ${GRAFANA_LOG_DIR:-/var/log/grafana}:/var/log/grafana
+    environment:
+      GF_INSTALL_PLUGINS: victoriametrics-logs-datasource
+      GF_SECURITY_ADMIN_PASSWORD: ${GF_SECURITY_ADMIN_PASSWORD}
+    ports:
+      - "127.0.0.1:3000:3000"
+    deploy:
+      resources:
+        limits:
+          memory: ${GRAFANA_MEM_LIMIT:-400M}
+          cpus: "0.4"
+
+volumes:
+  vm-data:
+  vl-data:
+  am-data:
+  grafana-data:

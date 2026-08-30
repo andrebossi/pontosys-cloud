@@ -1,0 +1,10 @@
+---
+dotnet_channel: "5.0"
+dotnet_version: "5.0.17"
+dotnet_install_dir: /usr/share/dotnet
+
+# .NET 5 predates OpenSSL 3. On Ubuntu 22.04/24.04 libssl1.1 doesn't exist
+# in the repository and has to come from focal — without it any TLS path
+# (HttpClient https, certificates, some hash routines) fails at runtime.
+dotnet_needs_libssl11: true
+dotnet_libssl11_url: http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb

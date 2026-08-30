@@ -1,0 +1,35 @@
+---
+- name: Database credential for each application in OCI Vault
+  oracle.oci.oci_secrets_secret_bundle_facts:
+    secret_name: "{{ label_prefix }}-db-{{ item }}"
+    vault_id: "{{ vault_ocid }}"
+    auth_type: instance_principal
+  delegate_to: localhost
+  become: false
+  loop: "{{ applications.keys() | list }}"
+  register: app_secrets
+  no_log: true
+
+# The only place on the VM where the password appears: 0640 root:dotnetapp.
+# It doesn't go into the image, doesn't go into git, and doesn't show up in
+# `systemctl show`.
+- name: Env file per application
+  ansible.builtin.template:
+    src: app.env.j2
+    dest: "/etc/dotnet-apps/{{ item.item }}.env"
+    owner: root
+    group: dotnetapp
+    mode: "0640"
+  loop: "{{ app_secrets.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  no_log: true
+  notify: restart apps
+
+- name: Enable each application
+  ansible.builtin.systemd:
+    name: "dotnet-app@{{ item }}.service"
+    enabled: true
+    state: started
+    daemon_reload: true
+  loop: "{{ applications.keys() | list }}"

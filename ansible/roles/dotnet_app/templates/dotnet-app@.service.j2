@@ -1,0 +1,105 @@
+# {{ ansible_managed }}
+[Unit]
+Description=.NET 5 App (%i)
+After=network-online.target
+Wants=network-online.target
+AssertPathExists=/srv/apps/%i
+
+# Default is 5 starts in 10s; past that systemd marks it failed and stops
+# trying FOREVER. For an app that goes down because the database is
+# unreachable, this would leave it dead long after the database comes back.
+# The backoff is what prevents the tight loop.
+StartLimitIntervalSec=0
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+User=dotnetapp
+Group=dotnetapp
+Slice=apps.slice
+
+WorkingDirectory=/srv/apps/%i
+Environment=APP_DLL=%i.dll
+EnvironmentFile=/etc/dotnet-apps/%i.env
+ExecStart=/usr/bin/dotnet /srv/apps/%i/${APP_DLL}
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=always
+RestartSec=2
+RestartSteps=6
+RestartMaxDelaySec=120
+
+TimeoutStartSec=60
+TimeoutStopSec=30
+KillSignal=SIGTERM
+KillMode=mixed
+
+# Accounting always on: it's what feeds cpu.stat and memory.events, which
+# app_cpu_throttled_pct and app_oom_kills_total come from. The CEILINGS live
+# in the per-app drop-in (10-limits.conf), never here.
+MemoryAccounting=yes
+CPUAccounting=yes
+IOAccounting=yes
+TasksAccounting=yes
+
+# OOMPolicy=kill: if the OOM killer catches a process in the cgroup, it kills
+# the whole cgroup and Restart=always comes back up clean. `continue` would
+# leave the app half-alive, answering 500s without anyone noticing.
+OOMPolicy=kill
+
+TasksMax=192
+LimitNOFILE=65535
+
+# .NET 5 uses the COMPlus_ prefix. DOTNET_ as a runtime configuration prefix
+# only became valid in .NET 6 — writing DOTNET_gcServer here doesn't error, it
+# is silently ignored and the app comes up with Server GC allocating a heap
+# per core.
+Environment=COMPlus_gcServer=0
+# Percentage of the cgroup limit usable as heap, IN HEXADECIMAL. 4B = 75.
+Environment=COMPlus_GCHeapHardLimitPercent=4B
+Environment=COMPlus_GCConserveMemory=3
+
+Environment=DOTNET_NOLOGO=1
+Environment=DOTNET_CLI_TELEMETRY_OPTOUT=1
+Environment=ASPNETCORE_ENVIRONMENT=Production
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=dotnet-%i
+LogExtraFields=APP=%i
+
+# journald drops messages in bursts (10000 msgs/30s per unit) and only warns
+# with "Suppressed N messages" — meaning it goes blind right during the incident.
+LogRateLimitIntervalSec=30
+LogRateLimitBurst=20000
+
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectProc=invisible
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# AF_NETLINK is included because .NET enumerates interfaces via netlink;
+# without it the app throws an exception on startup.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+# DO NOT enable: the JIT needs writable-and-executable pages and the app
+# dies on the first compiled method.
+MemoryDenyWriteExecute=no
+
+StateDirectory=dotnet-dumps
+
+[Install]
+WantedBy=multi-user.target

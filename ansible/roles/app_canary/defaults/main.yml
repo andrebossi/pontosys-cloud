@@ -1,0 +1,8 @@
+---
+# status | up | shift | promote | abort
+canary_action: status
+canary_percent: 0
+canary_size: 1
+
+canary_backend_port: 8080
+canary_venv: /opt/pscloud/venv

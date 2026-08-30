@@ -1,0 +1,75 @@
+---
+- name: Install NGINX
+  ansible.builtin.include_role:
+    name: nginxinc.nginx_core.nginx
+  vars:
+    nginx_install_from: os_repository
+    nginx_service_modify: true
+    nginx_service_timeout: 30
+
+- name: Build the configuration from the app catalog
+  ansible.builtin.set_fact:
+    app_http_config: "{{ lookup('template', 'http.yml.j2') | from_yaml }}"
+
+- name: Configure NGINX
+  ansible.builtin.include_role:
+    name: nginxinc.nginx_core.nginx_config
+  vars:
+    nginx_config_debug_output: false
+    nginx_config_main_template_enable: true
+    nginx_config_main_template:
+      template_file: nginx.conf.j2
+      deployment_location: /etc/nginx/nginx.conf
+      backup: true
+      config:
+        main:
+          worker_processes: auto
+          worker_rlimit_nofile: 65535
+        events:
+          worker_connections: 4096
+          multi_accept: true
+        http:
+          server_tokens: "off"
+          sendfile: true
+          tcp_nodelay: true
+          tcp_nopush: true
+          keepalive_timeout: 65
+          types_hash_max_size: 2048
+          # 9 server blocks with long names overflow the default 32 bucket.
+          server_names_hash_bucket_size: 128
+          log:
+            format:
+              - name: json_analytics
+                escape: json
+                format: "{{ nginx_json_log_format }}"
+            error:
+              - path: "{{ nginx_error_log }}"
+                level: warn
+          include:
+            - /etc/nginx/conf.d/*.conf
+
+    nginx_config_http_template_enable: true
+    nginx_config_http_template:
+      - template_file: http/default.conf.j2
+        deployment_location: /etc/nginx/conf.d/apps.conf
+        backup: true
+        config: "{{ app_http_config }}"
+
+      - template_file: http/default.conf.j2
+        deployment_location: /etc/nginx/conf.d/status.conf
+        backup: true
+        config:
+          servers:
+            - core:
+                listen:
+                  - ip: 127.0.0.1
+                    port: "{{ nginx_status_port }}"
+                server_name: _
+              locations:
+                - location: = /nginx_status
+                  custom_directives:
+                    - stub_status on;
+                    - access_log off;
+                - location: /
+                  custom_directives:
+                    - return 404;

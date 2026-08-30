@@ -1,0 +1,8 @@
+---
+# units.yml e o que a imagem dourada leva assada; apps.yml depende de segredo e
+# so roda na maquina viva.
+- name: Units e limites
+  ansible.builtin.include_tasks: units.yml
+
+- name: Aplicacoes
+  ansible.builtin.include_tasks: apps.yml

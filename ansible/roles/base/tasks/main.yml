@@ -1,0 +1,43 @@
+---
+- name: Fuso horario
+  ansible.builtin.timezone:
+    name: America/Sao_Paulo
+
+- name: Sysctl
+  ansible.posix.sysctl:
+    name: "{{ item.k }}"
+    value: "{{ item.v }}"
+    state: present
+    reload: true
+  loop:
+    - { k: vm.overcommit_memory, v: "1" }
+    - { k: net.core.somaxconn, v: "4096" }
+    - { k: net.ipv4.tcp_max_syn_backlog, v: "4096" }
+    - { k: net.ipv4.tcp_tw_reuse, v: "1" }
+    - { k: fs.file-max, v: "200000" }
+
+- name: Ferramentas de operacao
+  ansible.builtin.apt:
+    name: [jq, curl, python3-oci-cli, sysstat, iotop]
+    state: present
+    update_cache: true
+
+- name: Script de identidade OCI
+  ansible.builtin.copy:
+    dest: /usr/local/bin/oci-instance-label.sh
+    mode: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -euo pipefail
+      MD=$(curl -sf -H "Authorization: Bearer Oracle" \
+             http://169.254.169.254/opc/v2/instance/)
+      {
+        echo "INSTANCE_ID=$(jq -r .id <<<"$MD")"
+        echo "INSTANCE_NAME=$(jq -r .displayName <<<"$MD")"
+        echo "SHAPE=$(jq -r .shape <<<"$MD")"
+        echo "AD=$(jq -r .availabilityDomain <<<"$MD")"
+        echo "FD=$(jq -r .faultDomain <<<"$MD")"
+        echo "REGION=$(jq -r .canonicalRegionName <<<"$MD")"
+        echo "ROLE=$(jq -r '.definedTags.pscloud.role // "unknown"' <<<"$MD")"
+      } > /run/instance.env
+      chmod 0644 /run/instance.env

@@ -1,0 +1,10 @@
+---
+- name: restart observability
+  community.docker.docker_compose_v2:
+    project_src: "{{ observability_dir }}"
+    state: restarted
+
+- name: restart fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: restarted

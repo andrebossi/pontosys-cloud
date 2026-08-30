@@ -1,0 +1,20 @@
+# Inventario dinamico. As VMs do instance pool nao tem nome nem IP estaveis --
+# inventario estatico ficaria errado no primeiro scale-out. O agrupamento sai
+# da tag definida que o Terraform aplica (pscloud.role), a MESMA que alimenta os
+# dynamic groups de IAM. Uma fonte de verdade para rede, identidade e Ansible.
+plugin: oracle.oci.oci
+regions:
+  - sa-saopaulo-1
+compartments:
+  - compartment_ocid: "{{ lookup('env', 'OCI_COMPARTMENT_OCID') }}"
+    fetch_hosts_from_subcompartments: false
+
+hostname_format: private_ip
+
+keyed_groups:
+  - key: defined_tags['pscloud']['role']
+    prefix: role
+    separator: "_"
+
+compose:
+  ansible_host: private_ip

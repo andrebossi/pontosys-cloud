@@ -1,0 +1,130 @@
+---
+- name: Official Fluent Bit repository
+  ansible.builtin.deb822_repository:
+    name: fluent-bit
+    types: [deb]
+    uris: "https://packages.fluentbit.io/ubuntu/{{ ansible_distribution_release }}"
+    suites: "{{ ansible_distribution_release }}"
+    components: [main]
+    signed_by: https://packages.fluentbit.io/fluentbit.key
+    state: present
+
+- name: Install the agent
+  ansible.builtin.apt:
+    name: fluent-bit
+    state: present
+    update_cache: true
+
+- name: Service user
+  ansible.builtin.user:
+    name: fluent-bit
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: fluent-bit
+    group: fluent-bit
+    mode: "0755"
+  loop:
+    - "{{ fluentbit_state_dir }}"
+    - "{{ fluentbit_state_dir }}/storage"
+    - "{{ fluentbit_textfile_dir }}"
+
+- name: Parsers configuration
+  ansible.builtin.template:
+    src: parsers.yaml.j2
+    dest: "{{ fluentbit_config_dir }}/parsers.yaml"
+    mode: "0644"
+  notify: reload fluent-bit
+
+- name: Helper scripts (Lua, exporters)
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ fluentbit_config_dir }}/{{ item }}"
+    mode: "0644"
+  loop: "{{ fluentbit_extra_files }}"
+  notify: reload fluent-bit
+
+# The node_exporter_metrics textfile collector reads this directory. It is
+# the bridge for what the agent doesn't collect on its own -- CPU and memory
+# per cgroup, which is where per-app throttling and OOM events show up.
+- name: Textfile exporters
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "/usr/local/bin/{{ item.src }}"
+    mode: "0755"
+  loop: "{{ textfile_exporters }}"
+  loop_control: { label: "{{ item.name }}" }
+
+- name: Exporters timer
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/textfile-{{ item.name }}.timer"
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Textfile collection ({{ item.name }})
+
+      [Timer]
+      OnBootSec=30s
+      OnUnitActiveSec={{ item.interval }}s
+
+      [Install]
+      WantedBy=timers.target
+  loop: "{{ textfile_exporters }}"
+  loop_control: { label: "{{ item.name }}" }
+
+- name: Exporters unit
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/textfile-{{ item.name }}.service"
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Textfile collection ({{ item.name }})
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/bin/{{ item.src }}
+      Nice=10
+      IOWeight=20
+      MemoryMax=64M
+  loop: "{{ textfile_exporters }}"
+  loop_control: { label: "{{ item.name }}" }
+
+- name: Agent unit
+  ansible.builtin.template:
+    src: fluent-bit.service.j2
+    dest: /etc/systemd/system/fluent-bit.service
+    mode: "0644"
+  notify: restart fluent-bit
+
+# validate runs before writing: an invalid config never reaches disk, so the
+# agent keeps running with the last good one instead of entering a restart loop.
+- name: Configuration
+  ansible.builtin.template:
+    src: fluent-bit.yaml.j2
+    dest: "{{ fluentbit_config_dir }}/fluent-bit.yaml"
+    mode: "0644"
+    validate: "fluent-bit --dry-run -c %s"
+  notify: reload fluent-bit
+
+- name: Enable agent and timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  loop: "{{ ['fluent-bit'] + (textfile_exporters | map(attribute='name') | map('regex_replace', '^', 'textfile-') | map('regex_replace', '$', '.timer') | list) }}"
+
+- name: Agent is serving
+  ansible.builtin.uri:
+    url: "http://127.0.0.1:{{ fluentbit_http_port }}/api/v1/health"
+    status_code: 200
+  register: fb_health
+  retries: 6
+  delay: 5
+  until: fb_health is succeeded
+  changed_when: false
