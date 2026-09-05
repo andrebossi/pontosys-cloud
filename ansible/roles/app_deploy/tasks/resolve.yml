@@ -64,18 +64,53 @@
   when:
     - app_version | length == 0
     - app_version_source == 'latest'
+  run_once: true
   block:
-    - name: Ask the store
-      ansible.builtin.include_role:
-        name: artifact
-        tasks_from: latest.yml
-      vars:
-        artifact_names: "{{ deploy_apps }}"
-      run_once: true
+    - name: Ask the bucket
+      ansible.builtin.command: "/usr/local/bin/pscloud latest {{ item }}"
+      loop: "{{ deploy_apps }}"
+      delegate_to: "{{ app_release_host }}"
+      register: bucket_latest
+      changed_when: false
+      when: artifact_store == 'bucket'
+
+    # Emits JSON rather than lines: from_json is core, and a `split` filter is
+    # not portable across ansible-core versions.
+    - name: Ask {{ local_artifact_dir }}
+      ansible.builtin.shell:
+        cmd: |
+          sep=; printf '{'
+          for n in {{ deploy_apps | join(' ') }}; do
+            f=$(ls -1t "{{ local_artifact_dir }}/$n/$n-"*.tar.gz 2>/dev/null | head -1)
+            [ -n "$f" ] || continue
+            v=$(basename "$f" .tar.gz)
+            printf '%s"%s":"%s"' "$sep" "$n" "${v#"$n"-}"
+            sep=,
+          done
+          printf '}'
+        executable: /bin/bash
+      delegate_to: localhost
+      become: false
+      changed_when: false
+      register: local_latest
+      when: artifact_store == 'local'
 
     - name: Use them
       ansible.builtin.set_fact:
-        app_versions: "{{ artifact_versions }}"
+        app_versions: >-
+          {{ dict(deploy_apps | zip(bucket_latest.results | map(attribute='stdout') | map('trim')))
+             if artifact_store == 'bucket'
+             else (local_latest.stdout | from_json) }}
+
+    - name: Every application has one
+      ansible.builtin.assert:
+        that: deploy_apps | difference(app_versions.keys() | list) | length == 0
+        fail_msg: >-
+          No artifact for:
+          {{ deploy_apps | difference(app_versions.keys() | list) | join(', ') }}.
+          Publish with `pscloud push <app> <version> <file>`, or drop it in
+          {{ local_artifact_dir }}/<app>/ when artifact_store=local.
+        quiet: true
 
 - name: What this run will install
   ansible.builtin.debug:

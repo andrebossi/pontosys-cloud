@@ -22,7 +22,6 @@ image.yml                    the golden image, run by Packer
 |---|---|
 | `base` | accounts and sudo, timezone, sysctl, THP, I/O scheduler, swap, journald, firewall, OCI identity |
 | `secrets` | credentials, from OCI Vault or a local file, generated on first use |
-| `artifact` | fetch and unpack a bundle, from the bucket or a local directory |
 | `dotnet_runtime` | the two .NET runtimes, OpenSSL compat, libgdiplus, fonts |
 | `dotnet_app` | the systemd slice, unit template, drop-ins, config and secrets |
 | `db_users` | one MySQL account per application, granted only its schemas |
@@ -170,7 +169,7 @@ Worth knowing before you trust a green run:
   identity. Everything else works.
 - **Pre-authenticated URLs.** Local copies files over the SSH connection; the
   cloud has the target fetch them itself over HTTP. Different code path in
-  `roles/artifact`, same unpack.
+  the `unarchive` call, same unpack.
 - **The load balancer**, and therefore the whole rc-in-prod idea.
 - **The golden image.** Packer needs OCI.
 
@@ -380,21 +379,34 @@ artifacts/webroot/webroot-<version>.tar.gz   the SPA bundles and error pages
 manifests/<env>/{current,<release>}.json     what each environment runs
 ```
 
-`roles/artifact` is the only thing that knows how to fetch one, which is why
-`artifact_store: local` needed implementing in exactly one place for apps,
-fonts and the web root alike.
-
 In the cloud a machine downloads through a **pre-authenticated URL minted by
 the release host**, so an autoscaled VM needs no credential of its own and the
 bytes go over the service gateway instead of the NAT gateway. There is no path
 that pulls from GitHub.
 
-Fonts and the web root are versioned and pinnable like anything else:
+Fetching is two tasks, and they are written out in each of the three places
+that need them rather than hidden behind a shared role. `unarchive` covers both
+stores in one call — with `remote_src` the target downloads the URL itself,
+without it the file is copied from the control node:
 
 ```yaml
-fonts_version: latest        # or "1"
-webroot_version: latest      # or "2026.09.12"
+- name: download URL                     # only when artifact_store == bucket
+  command: pscloud par artifacts/<name>/<name>-<version>.tar.gz --ttl 900
+  delegate_to: "{{ app_release_host }}"
+
+- name: unpack
+  unarchive:
+    src: "{{ par.stdout | trim if bucket else local_artifact_dir ~ '/...' }}"
+    remote_src: "{{ artifact_store == 'bucket' }}"
 ```
+
+**Fonts and the web root are pinned, not chased.** `fonts_version` and
+`webroot_version` are version strings in group_vars; publishing a new bundle
+and bumping the number is a reviewed commit, for the same reason the golden
+image is pinned in Terraform. An image build that silently picked up a new set
+of faces would change every report it renders with nothing in git saying so.
+`latest` exists only for application versions, where rc is *supposed* to chase
+the tip and record what it got.
 
 ## Where a change goes
 

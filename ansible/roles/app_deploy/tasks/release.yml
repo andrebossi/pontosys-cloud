@@ -7,17 +7,43 @@
     release_dir: "{{ app_deploy_root }}/{{ app_name }}/releases/{{ app_versions[app_name] }}"
   block:
 
-    - name: "{{ app_name }} — fetch and unpack {{ app_ver }}"
-      ansible.builtin.include_role:
-        name: artifact
-        tasks_from: fetch.yml
-      vars:
-        artifact_name: "{{ app_name }}"
-        artifact_version: "{{ app_ver }}"
-        artifact_dest: "{{ release_dir }}"
-        artifact_owner: "{{ app_deploy_user }}"
-        artifact_group: "{{ app_deploy_user }}"
-        artifact_creates: "{{ release_dir }}/{{ app.dll }}"
+    - name: "{{ app_name }} — release directory"
+      ansible.builtin.file:
+        path: "{{ release_dir }}"
+        state: directory
+        owner: "{{ app_deploy_user }}"
+        group: "{{ app_deploy_user }}"
+        mode: "0755"
+
+    # The application VMs hold no credential for Object Storage and have no OCI
+    # tooling. The release host mints a read-only, single-object, short-lived
+    # URL and the target fetches it itself -- which is why an autoscaled VM
+    # never needs a token of its own.
+    - name: "{{ app_name }} — download URL"
+      ansible.builtin.command: >-
+        /usr/local/bin/pscloud par
+        artifacts/{{ app_name }}/{{ app_name }}-{{ app_ver }}.tar.gz
+        --ttl {{ artifact_par_ttl }}
+      delegate_to: "{{ app_release_host }}"
+      register: artifact_par
+      changed_when: false
+      no_log: true
+      when: artifact_store == 'bucket'
+
+    # One task for both stores: with remote_src the target downloads the URL
+    # itself, without it the file is copied from the control node. A publish
+    # tree is tens of megabytes, so the first is what the cloud wants and the
+    # second is what makes a run against local VMs work at all.
+    - name: "{{ app_name }} — unpack {{ app_ver }}"
+      ansible.builtin.unarchive:
+        src: "{{ (artifact_par.stdout | trim) if artifact_store == 'bucket'
+                 else local_artifact_dir ~ '/' ~ app_name ~ '/' ~ app_name ~ '-' ~ app_ver ~ '.tar.gz' }}"
+        remote_src: "{{ artifact_store == 'bucket' }}"
+        dest: "{{ release_dir }}"
+        owner: "{{ app_deploy_user }}"
+        group: "{{ app_deploy_user }}"
+        extra_opts: [--no-same-owner]
+        creates: "{{ release_dir }}/{{ app.dll }}"
 
     # A tarball built from the parent directory unpacks one level too deep and
     # the assembly lands at releases/<ver>/publish/App.dll. Caught here, with a

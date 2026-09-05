@@ -1,27 +1,52 @@
 ---
-# The SPA bundles and the error pages, as one artifact in the store. They are
-# build output, not configuration: they belong next to the application
-# tarballs, not in this repository. Publish with
+# The SPA bundles and the error pages, as one artifact. They are build output,
+# not configuration: they belong next to the application tarballs. Publish with
 #   tar -C webroot -czf webroot.tar.gz . && pscloud push webroot <ver> ./webroot.tar.gz
-- name: Web root version
-  ansible.builtin.include_role:
-    name: artifact
-    tasks_from: latest.yml
-  vars:
-    artifact_names: ["{{ webroot_artifact }}"]
-  when: webroot_version == 'latest'
+# then bump webroot_version in group_vars -- a reviewed change, for the same
+# reason the golden image is pinned in Terraform rather than chased.
+- name: Document root
+  ansible.builtin.file:
+    path: "{{ nginx_static_root }}"
+    state: directory
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_user }}"
+    mode: "0755"
 
+- name: Web root download URL
+  ansible.builtin.command: >-
+    /usr/local/bin/pscloud par
+    artifacts/{{ webroot_artifact }}/{{ webroot_artifact }}-{{ webroot_version }}.tar.gz
+    --ttl {{ artifact_par_ttl }}
+  delegate_to: "{{ app_release_host }}"
+  register: webroot_par
+  changed_when: false
+  no_log: true
+  when: artifact_store == 'bucket'
+
+# ~140 MB across a few thousand files, so this one gets a version stamp: with
+# it the unpack is skipped outright when the version has not moved, instead of
+# unarchive reading the whole archive to work that out.
 - name: Web root
-  ansible.builtin.include_role:
-    name: artifact
-    tasks_from: fetch.yml
-  vars:
-    artifact_name: "{{ webroot_artifact }}"
-    artifact_version: "{{ webroot_version if webroot_version != 'latest'
-                          else artifact_versions[webroot_artifact] }}"
-    artifact_dest: "{{ nginx_static_root }}"
-    artifact_owner: "{{ nginx_user }}"
-    artifact_group: "{{ nginx_user }}"
+  ansible.builtin.unarchive:
+    src: "{{ (webroot_par.stdout | trim) if artifact_store == 'bucket'
+             else local_artifact_dir ~ '/' ~ webroot_artifact ~ '/' ~ webroot_artifact ~ '-' ~ webroot_version ~ '.tar.gz' }}"
+    remote_src: "{{ artifact_store == 'bucket' }}"
+    dest: "{{ nginx_static_root }}"
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_user }}"
+    extra_opts: [--no-same-owner]
+    creates: "{{ nginx_static_root }}/.version-{{ webroot_version }}"
+  register: webroot_installed
+
+- name: Stamp the version
+  ansible.builtin.file:
+    path: "{{ nginx_static_root }}/.version-{{ webroot_version }}"
+    state: touch
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_user }}"
+    mode: "0644"
+  when: webroot_installed is changed
+  changed_when: false
 
 # 404.html and 50x.html reference /poweredby.png, which was a symlink to
 # nginx-logo.png on the old machine; without it both pages render a broken

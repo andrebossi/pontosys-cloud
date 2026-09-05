@@ -7,10 +7,11 @@ dotnet_runtimes: {}
 dotnet_compat_packages: []
 dotnet_fonts: []
 
-# The font bundle in the artifact store. `latest` resolves at converge time;
-# pin a version to make a build reproducible.
+# The font bundle in the artifact store. Pinned, not `latest`: an image build
+# that silently picked up a new set of faces would change every report it
+# renders without anything in git saying so.
 fonts_artifact: fonts
-fonts_version: latest
+fonts_version: "1"
 
 # dotnetcli.azureedge.net was retired in 2024; this CDN still serves
 # out-of-support versions.

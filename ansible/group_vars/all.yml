@@ -23,9 +23,18 @@ host_memory_mb: 6144
 # service gateway instead of the NAT gateway.
 artifact_bucket: pscloud-artifacts
 
-# bucket | local, and oci | local. group_vars/env_local.yml flips both; nothing
-# else in the repository knows the difference.
+# bucket | local, and oci | local. group_vars/env_local.yml flips both.
+#
+# bucket   the object store, reached through a short-lived pre-authenticated
+#          URL minted by app_release_host. The target needs no credential.
+# local    a directory on the control node, laid out the same way, so the same
+#          tarballs work in both.
 artifact_store: bucket
+local_artifact_dir: "{{ lookup('env', 'HOME') }}/pscloud-artifacts"
+# Long enough for a slow unpack on a small box, short enough that a leaked log
+# line is worthless by the time anyone reads it.
+artifact_par_ttl: 900
+
 secrets_backend: oci
 
 # Where the `pscloud` CLI runs: it needs OCI credentials, which the monitoring

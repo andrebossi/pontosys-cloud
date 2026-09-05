@@ -60,7 +60,7 @@ app_upstream_keepalive: 16
 nginx_deploy_static: true
 
 webroot_artifact: webroot
-webroot_version: latest
+webroot_version: "1"
 
 applications: {}
 static_sites: {}
