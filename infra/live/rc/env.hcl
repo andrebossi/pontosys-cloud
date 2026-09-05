@@ -7,7 +7,7 @@ locals {
 
   compartment_id = "ocid1.tenancy.oc1..aaaaaaaa5lalh56ffqq2aorknmx3aokh5pekgj5hkplpbroue6ljcpdwqrtq"
 
-  objectstorage_namespace = "pscloud-pltf"
+  objectstorage_namespace = "grkmcm7puhc0"
   state_bucket            = "pscloud-tfstate"
   state_kms_key_id        = null
 

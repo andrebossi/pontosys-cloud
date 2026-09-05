@@ -11,12 +11,6 @@ data "oci_core_images" "os" {
   shape                    = var.shape
   sort_by                  = "TIMECREATED"
   sort_order               = "DESC"
-
-  filter {
-    name   = "display_name"
-    values = ["^((?!Minimal|GPU).)*$"]
-    regex  = true
-  }
 }
 
 locals {
@@ -25,7 +19,10 @@ locals {
     data.oci_identity_availability_domains.this.availability_domains[var.availability_domain_index].name,
   )
 
-  image_id = var.app_image_id != "" ? var.app_image_id : data.oci_core_images.os[0].images[0].id
+  image_id = var.app_image_id != "" ? var.app_image_id : [
+    for image in data.oci_core_images.os[0].images : image.id
+    if !can(regex("Minimal|GPU", image.display_name))
+  ][0]
 
   user_data = templatefile("${path.module}/../cloud-init/common.yaml.tftpl", {
     hostname              = "${var.label_prefix}-app"

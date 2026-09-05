@@ -17,14 +17,14 @@ dependency "network" {
     subnet_ids = { public = "ocid1.subnet.oc1..mock" }
     nsg_ids    = { lb = "ocid1.networksecuritygroup.oc1..mock" }
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 
 dependency "compute" {
   config_path = "../compute"
 
   mock_outputs                            = { private_ips = { "01" = "10.20.16.20" } }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 
 inputs = {

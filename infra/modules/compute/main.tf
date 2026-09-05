@@ -11,17 +11,14 @@ data "oci_core_images" "this" {
   shape                    = var.shape
   sort_by                  = "TIMECREATED"
   sort_order               = "DESC"
-
-  filter {
-    name   = "display_name"
-    values = ["^((?!Minimal|GPU).)*$"]
-    regex  = true
-  }
 }
 
 locals {
   availability_domains = [for ad in data.oci_identity_availability_domains.this.availability_domains : ad.name]
-  image_id             = var.image_id != null ? var.image_id : data.oci_core_images.this[0].images[0].id
+  image_id = var.image_id != null ? var.image_id : [
+    for image in data.oci_core_images.this[0].images : image.id
+    if !can(regex("Minimal|GPU", image.display_name))
+  ][0]
 }
 
 resource "oci_core_instance" "this" {

@@ -17,14 +17,14 @@ dependency "network" {
     subnet_ids = { app = "ocid1.subnet.oc1..mock" }
     nsg_ids    = { app = "ocid1.networksecuritygroup.oc1..mock" }
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 
 dependency "platform" {
   config_path = "../../prod/platform"
 
   mock_outputs                            = { ssh_public_keys = { app = "ssh-rsa MOCK" } }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 
 dependency "identity" {
@@ -34,7 +34,7 @@ dependency "identity" {
     role_defined_tags = { app = { "pscloud.role" = "app" } }
     tag_keys          = { environment = "pscloud.environment", cost_center = "pscloud.cost_center" }
   }
-  mock_outputs_allowed_terraform_commands = ["validate", "plan"]
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 
 inputs = {

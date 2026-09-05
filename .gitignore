@@ -49,3 +49,7 @@ terraform.rc
 terragrunt-debug.tfvars.json
 
 # End of https://www.toptal.com/developers/gitignore/api/terraform,terragrunt,ansible
+
+keys/*
+!infra/bootstrap/*.tfvars
+!infra/bootstrap/*.tfstate
