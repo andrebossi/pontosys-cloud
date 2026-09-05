@@ -1,7 +1,7 @@
 ---
-# units.yml is what the golden image bakes: users, directories, the slice and
-# the unit files. config.yml reads secrets and only runs against a live
-# machine -- an image is shared by the whole fleet and must not carry any.
+# units.yml is what the golden image bakes: the account, the directories, the
+# slice and the unit files. config.yml reads credentials and only runs against
+# a live machine -- an image is shared by the whole fleet and carries none.
 - name: Units, slice and directories
   ansible.builtin.include_tasks: units.yml
 

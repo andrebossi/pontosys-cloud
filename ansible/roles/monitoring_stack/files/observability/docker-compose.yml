@@ -19,10 +19,9 @@ services:
       - --httpListenAddr=:8428
       - --retentionPeriod=${VM_RETENTION:-3m}
       - --storage.maxDiskSpaceUsageBytes=${VM_MAX_DISK:-20GB}
-      # Mandatory. The default is -memory.allowedPercent=60, computed against the
-      # HOST's RAM -- inside a container limited to 1G this would make the VM
-      # think it can use 4.8G and get killed by the cgroup's OOM killer.
-      - --memory.allowedBytes=${VM_MEM_ALLOWED:-700MB}
+      # Mandatory. The default is -memory.allowedPercent=60, computed against
+      # the HOST's RAM, not the container limit -- see group_vars/role_monitoring.
+      - --memory.allowedBytes=${VM_MEM_ALLOWED:-1400MB}
       - --search.maxConcurrentRequests=${VM_MAX_QUERIES:-4}
       - --search.maxQueryDuration=30s
       - --dedup.minScrapeInterval=15s
@@ -39,8 +38,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${VM_MEM_LIMIT:-1G}
-          cpus: "${VM_CPUS:-0.6}"
+          memory: ${VM_MEM_LIMIT:-2G}
+          cpus: "${VM_CPUS:-1.0}"
 
   victorialogs:
     <<: *common
@@ -52,7 +51,7 @@ services:
       - --httpListenAddr=:9428
       - --retentionPeriod=${VL_RETENTION:-30d}
       - --retention.maxDiskSpaceUsageBytes=${VL_MAX_DISK:-30GB}
-      - --memory.allowedBytes=${VL_MEM_ALLOWED:-550MB}
+      - --memory.allowedBytes=${VL_MEM_ALLOWED:-1400MB}
       - --insert.maxFieldsPerLine=200
       - --loggerLevel=WARN
     ports:
@@ -66,8 +65,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${VL_MEM_LIMIT:-800M}
-          cpus: "${VL_CPUS:-0.5}"
+          memory: ${VL_MEM_LIMIT:-2G}
+          cpus: "${VL_CPUS:-0.8}"
 
   vmalert:
     <<: *common
@@ -94,7 +93,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${VMALERT_MEM_LIMIT:-128M}
+          memory: ${VMALERT_MEM_LIMIT:-256M}
           cpus: "0.2"
 
   alertmanager:
@@ -108,7 +107,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${AM_MEM_LIMIT:-128M}
+          memory: ${AM_MEM_LIMIT:-192M}
           cpus: "0.1"
 
   grafana:
@@ -133,7 +132,7 @@ services:
     deploy:
       resources:
         limits:
-          memory: ${GRAFANA_MEM_LIMIT:-400M}
+          memory: ${GRAFANA_MEM_LIMIT:-768M}
           cpus: "0.4"
 
 volumes:

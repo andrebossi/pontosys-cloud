@@ -5,37 +5,34 @@
 # Split by sensitivity, because the two halves want different handling:
 #
 #   app_settings_*   non-secret. Rendered into
-#                    /srv/apps/<app>/shared/appsettings.Production.json,
-#                    world-readable, diffable, reviewed in a pull request.
-#                    .NET loads appsettings.json from the artifact first and
-#                    then overlays this file (ASPNETCORE_ENVIRONMENT=Production),
-#                    so the artifact's own defaults stay untouched.
+#                    /srv/apps/<app>/shared/appsettings.Production.json and
+#                    overlaid by .NET on top of the artifact's own
+#                    appsettings.json (ASPNETCORE_ENVIRONMENT=Production).
+#                    Diffable, reviewed in a pull request.
 #
-#   db_servers,      secret. Rendered into /etc/dotnet-apps/<app>.env as
-#   app_secrets      environment variables, 0640 root:dotnetapp. Environment
-#                    configuration outranks every JSON file, so this wins.
-#                    Values come from an ansible-vault file -- see vault.yml.
+#   app_secret_refs  secret. A name in OCI Vault, read by roles/secrets
+#   connections      and rendered into /etc/dotnet-apps/<app>.env as
+#                    environment variables, 0640 root:dotnetapp. Environment
+#                    configuration outranks every JSON file, so it wins.
 #
 # Nesting in an env var uses "__": ConnectionStrings__VSGlobalContext maps to
 # the "VSGlobalContext" entry under "ConnectionStrings".
+#
+# The blocks below mirror what each application actually reads today -- see
+# the appsettings.json each one shipped with on the old machine. Only the
+# user and the host change: every application now connects as its own
+# app_<name> account instead of the shared glb_user and cep_user.
 # ===========================================================================
 
 app_public_url: "https://virtualstore.pontosys.com"
 
-# Applied to every app, then overlaid by the per-app block below.
-app_settings_common:
-  AllowedHosts: "*"
-  Logging:
-    LogLevel:
-      Default: Information
-      Microsoft.AspNetCore: Warning
-  UrlApis:
-    MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
-    MonitorRelatorios: "{{ app_public_url }}/geradorrelatoriosapi"
+# The apps ship their own logs to Graylog through Serilog; Fluent Bit collects
+# the unit's stdout/stderr and the host on top of that.
+_serilog: &serilog
   LogCustom:
     Graylog:
-      HostnameOrAddress: "{{ graylog_host }}"
-      Port: "{{ graylog_port }}"
+      HostnameOrAddress: 187.77.254.127
+      Port: 12201
   Serilog:
     MinimumLevel:
       Default: Information
@@ -45,80 +42,140 @@ app_settings_common:
         Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager: Fatal
         Serilog.AspNetCore.RequestLoggingMiddleware: Fatal
 
-# The apps already ship their own logs to Graylog through Serilog; Fluent Bit
-# collects the unit's stdout/stderr and the host on top of that.
-graylog_host: 187.77.254.127
-graylog_port: 12201
+# The storefront family. Audience and issuer are not secrets; the signing key
+# is, and it is in app_secret_refs.
+_token_vs: &token_vs
+  TokenConfigurations:
+    Audience: VSAudiencePS
+    Issuer: VSIssuerPS
+    Seconds: 86400
 
-# Per-app overlay. Only what differs from the common block.
+# monitorclientesapi and geradorrelatoriosapi share an issuer and a key: the
+# reports API validates tokens the directory minted.
+_token_mc: &token_mc
+  TokenConfigurations:
+    Audience: MonitorClientesVirtualStore
+    Issuer: "Ponto.Sys Sistemas"
+    HoursExpires: 12
+
+# Applied to every app, then overlaid by the per-app block.
+app_settings_common:
+  AllowedHosts: "*"
+  Logging:
+    LogLevel:
+      Default: Information
+      Microsoft.AspNetCore: Warning
+
 app_settings:
   virtualstore:
+    <<: [*serilog, *token_vs]
+    UrlApis:
+      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
     Links:
       UrlConfirmacaoEmail: "{{ app_public_url }}/#/confirmar-email/"
       UrlRecupecaoSenha: "{{ app_public_url }}/app/#/recuperar-senha/"
+    SmtpClientData:
+      MailDisplayName: "Ponto.Sys Sistemas"
+      MailFrom: naoresponder@pontosys.com
+      MailHost: smtpi.kinghost.net
+      MailPort: 587
+      MailEnableSsl: true
+      MailSuportePontoSys: rafael@pontosys.com
     EmailsFinanceiro:
       - elvis@pontosys.com
       - leandro@pontosys.com
       - rafael@pontosys.com
 
+  monitorclientesapi:
+    <<: *token_mc
+
+  dashsapi:
+    <<: [*serilog, *token_vs]
+    UrlApis:
+      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+
+  relatoriosapi:
+    <<: [*serilog, *token_vs]
+    # `Relatorios`, not `MonitorRelatorios` -- this app reads a different key
+    # from the one cadastrosapi reads.
+    UrlApis:
+      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+      Relatorios: "{{ app_public_url }}/geradorrelatoriosapi"
+
+  geradorrelatoriosapi:
+    <<: *token_mc
+
+  cadastrosapi:
+    <<: [*serilog, *token_vs]
+    UrlApis:
+      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+      MonitorRelatorios: "{{ app_public_url }}/geradorrelatoriosapi"
+
+  entradaapi:
+    <<: [*serilog, *token_vs]
+    UrlApis:
+      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+
+  pixapi: {}
+
 # ---------------------------------------------------------------------------
 # DATABASES
 #
-# Named servers, referenced by the `connections` map in the catalog. An app
-# names the .NET connection-string key it expects; this table says what that
-# key points at. Moving a schema to another server is one edit here.
+# db_servers says WHERE a schema lives. It holds no credentials: a server is a
+# location, not an identity. WHO connects is one MySQL account per
+# application, derived from the catalog -- app_<name>, granted only on the
+# schemas that application's `connections` reference.
+#
+# This replaces glb_user and cep_user, shared by four and three applications
+# respectively, where a leaked connection string from the reports API opened
+# the sales database for writing.
 # ---------------------------------------------------------------------------
+db_host: "{{ lookup('env', 'PSCLOUD_DB_HOST') }}"
+db_port: 3306
+
 db_servers:
   global:
-    host: "{{ vault_db_global_host }}"
-    port: 3306
+    host: "{{ db_host }}"
+    port: "{{ db_port }}"
     database: virtualstoreglobal
-    username: "{{ vault_db_global_user }}"
-    password: "{{ vault_db_global_password }}"
+
   cep:
-    host: "{{ vault_db_cep_host }}"
-    port: 3306
+    host: "{{ db_host }}"
+    port: "{{ db_port }}"
     database: cep
-    username: "{{ vault_db_cep_user }}"
-    password: "{{ vault_db_cep_password }}"
+    # Brazilian postal codes: a reference set loaded out of band. Nothing in
+    # the fleet writes it, so nothing in the fleet gets write access to it.
+    privileges: SELECT
 
-# Extra options appended to every connection string. The pool ceiling is the
-# one that matters: nine apps x 2 VMs at the driver default of 100 would ask
-# for 1800 connections. Sized to stay under the server's max_connections.
+# What an application gets unless db_servers or the catalog says otherwise.
+# DROP, ALTER and CREATE are absent: a schema change is a migration, run
+# deliberately, not something an API can do by accident.
+db_privileges_default: SELECT,INSERT,UPDATE,DELETE,EXECUTE
+
+db_user_prefix: app_
+db_user_host: "10.20.%"
+
+db_admin:
+  host: "{{ db_host }}"
+  port: "{{ db_port }}"
+  username: "{{ lookup('env', 'PSCLOUD_DB_ADMIN_USER') | default('admin', true) }}"
+
 db_pool_max: 12
-db_connection_options: >-
-  persistsecurityinfo=True;SslMode=none;Convert Zero Datetime=true;
-  Maximum Pool Size={{ db_pool_max }};
 
 # ---------------------------------------------------------------------------
-# NON-DATABASE SECRETS
+# SECRETS
 #
-# Flat name -> value, injected as environment variables. The name is the .NET
-# configuration path with "__" for nesting.
+# Environment variable -> secret name in OCI Vault. Database passwords are not
+# listed: they are generated by roles/secrets on first run, stored in the
+# vault, and rendered into the connection string automatically.
+#
+# The two below are not generated -- they are shared with systems outside this
+# fleet, so they are created once by hand and only read from here.
 # ---------------------------------------------------------------------------
-app_secrets_common:
-  TokenConfigurations__Audience: "{{ vault_token_audience }}"
-  TokenConfigurations__Issuer: "{{ vault_token_issuer }}"
-  TokenConfigurations__Seconds: "86400"
-
-app_secrets:
+app_secret_refs:
   virtualstore:
-    SmtpClientData__MailDisplayName: "Ponto.Sys Sistemas"
-    SmtpClientData__MailFrom: naoresponder@pontosys.com
-    SmtpClientData__MailHost: smtpi.kinghost.net
-    SmtpClientData__MailPort: "587"
-    SmtpClientData__MailEnableSsl: "true"
-    SmtpClientData__MailSuportePontoSys: rafael@pontosys.com
-    SmtpClientData__MailPass: "{{ vault_smtp_password }}"
-
+    SmtpClientData__MailPass: "{{ secret_prefix }}-smtp-password"
   monitorclientesapi:
-    TokenConfigurations__Audience: MonitorClientesVirtualStore
-    TokenConfigurations__Issuer: "Ponto.Sys Sistemas"
-    TokenConfigurations__Key: "{{ vault_monitorclientes_token_key }}"
-    TokenConfigurations__HoursExpires: "12"
-
+    TokenConfigurations__Key: "{{ secret_prefix }}-jwt-monitorclientes"
   geradorrelatoriosapi:
-    TokenConfigurations__Audience: MonitorClientesVirtualStore
-    TokenConfigurations__Issuer: "Ponto.Sys Sistemas"
-    TokenConfigurations__Key: "{{ vault_monitorclientes_token_key }}"
-    TokenConfigurations__HoursExpires: "12"
+    TokenConfigurations__Key: "{{ secret_prefix }}-jwt-monitorclientes"

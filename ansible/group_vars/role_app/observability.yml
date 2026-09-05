@@ -2,14 +2,13 @@
 # ===========================================================================
 # WHAT THIS VM SENDS
 #
-# Lists of dictionaries appended to roles/observability_agent's base
-# collection. Adding a source is one entry -- no task and no template change.
+# Appended to roles/observability_agent's base collection. Adding a source is
+# one entry -- no task and no template change.
 # ===========================================================================
 fluentbit_extra_inputs:
 
-  # Application unit logs. The slice filter is what gives the collection its
-  # identity: without Slice=apps.slice on the unit, an app runs but is
-  # invisible here.
+  # Application unit logs. The slice filter is the collection's identity:
+  # without Slice=apps.slice on the unit, an app runs but is invisible here.
   - name: systemd
     tag: app.log
     systemd_filter:
@@ -51,6 +50,16 @@ fluentbit_extra_filters:
     script: systemd_classify.lua
     call: classify
 
+  # `job` has to be a field on the record: VictoriaLogs builds the stream from
+  # _stream_fields, and Fluent Bit's http output has no `labels` parameter.
+  - name: modify
+    match: app.log
+    add: job app
+
+  - name: modify
+    match: nginx.access
+    add: job nginx
+
   # Requests by app, status and method. stub_status has no status code, so
   # without this there is no 5xx series and no app-down alert to build on.
   - name: log_to_metrics
@@ -79,37 +88,35 @@ fluentbit_extra_filters:
       - status
 
 fluentbit_extra_outputs:
-  - name: loki
+  - name: http
     match: app.log
     host: "{{ monitoring_endpoints.logs.host }}"
     port: "{{ monitoring_endpoints.logs.port }}"
-    uri: "{{ monitoring_endpoints.logs.uri }}"
-    labels: job=app,instance=${INSTANCE_NAME},fd=${FD},pool=${POOL}
-    label_keys: $unit,$kind
-    line_format: json
-    remove_keys: BOOT_ID,MACHINE_ID,CAP_EFFECTIVE,SYSTEMD_CGROUP,SYSTEMD_INVOCATION_ID,SYSTEMD_SLICE,SOURCE_REALTIME_TIMESTAMP,SELINUX_CONTEXT,AUDIT_SESSION,AUDIT_LOGINUID,STREAM_ID,SYSLOG_FACILITY
+    uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,unit"
+    format: json_lines
+    json_date_format: iso8601
+    compress: gzip
     retry_limit: 5
     storage.total_limit_size: 256M
 
-  - name: loki
+  - name: http
     match: nginx.access
     host: "{{ monitoring_endpoints.logs.host }}"
     port: "{{ monitoring_endpoints.logs.port }}"
-    uri: "{{ monitoring_endpoints.logs.uri }}"
-    labels: job=nginx,instance=${INSTANCE_NAME},fd=${FD},pool=${POOL}
-    label_keys: $app,$status
-    line_format: json
+    uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,app"
+    format: json_lines
+    json_date_format: iso8601
+    compress: gzip
     retry_limit: 5
     storage.total_limit_size: 256M
 
 fluentbit_extra_files:
   - systemd_classify.lua
 
-# The built-in node_exporter_metrics `processes` collector only counts
-# processes by state -- no per-process CPU or memory. Since every app runs
-# under its own MemoryMax and CPUQuota, without this exporter per-app
-# throttling and OOM kills are invisible, which is the whole point of the
-# cgroup limits.
+# Per-app memory, swap, CPU throttling and pressure, plus host swap and PSI.
+# node_exporter_metrics counts processes by state and nothing else, so without
+# this the per-app ceilings are unobservable -- and swap use and rising memory
+# pressure are what move BEFORE an OOM kill, not after it.
 textfile_exporters:
   - name: cgroup
     src: cgroup-textfile-exporter.sh

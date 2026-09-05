@@ -1,6 +1,6 @@
 ---
-# A swapfile, not a partition: the boot volume is the only disk, and a file
-# can be resized without touching the partition table.
+# A file, not a partition: the boot volume is the only disk and a file can be
+# resized without touching the partition table.
 - name: Swapfile exists
   ansible.builtin.command:
     cmd: "fallocate -l {{ swap_size_mb }}M {{ swap_file }}"
@@ -19,7 +19,7 @@
   when: swap_created is changed
   changed_when: true
 
-- name: Swapfile in fstab and active
+- name: Swapfile in fstab
   ansible.posix.mount:
     name: none
     src: "{{ swap_file }}"

@@ -1,0 +1,103 @@
+---
+# Runs from an application VM: the NSG only lets the app tier reach 3306.
+# One host is enough -- the accounts are server-side -- so callers use run_once.
+
+- name: Credentials
+  ansible.builtin.include_role:
+    name: secrets
+  when: db_app_passwords is not defined
+
+- name: MySQL client library
+  ansible.builtin.apt:
+    name: python3-pymysql
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Applications that talk to a database
+  ansible.builtin.set_fact:
+    db_apps: >-
+      {{ applications | dict2items | rejectattr('value.connections', 'undefined')
+         | rejectattr('value.connections', 'eq', {}) | list }}
+
+- name: Schemas
+  ansible.mysql.mysql_db:
+    login_host: "{{ db_admin.host }}"
+    login_port: "{{ db_admin.port }}"
+    login_user: "{{ db_admin.username }}"
+    login_password: "{{ db_admin_password }}"
+    name: "{{ item.value.database }}"
+    encoding: "{{ db_schema_encoding }}"
+    collation: "{{ db_schema_collation }}"
+    state: present
+  loop: "{{ db_servers | dict2items }}"
+  loop_control:
+    label: "{{ item.value.database }}"
+  when: db_create_schemas | bool
+  no_log: true
+
+- name: Application accounts
+  ansible.mysql.mysql_user:
+    login_host: "{{ db_admin.host }}"
+    login_port: "{{ db_admin.port }}"
+    login_user: "{{ db_admin.username }}"
+    login_password: "{{ db_admin_password }}"
+    name: "{{ db_user_prefix }}{{ item.key }}"
+    host: "{{ db_user_host }}"
+    # NOT `password:`. The module gives it precedence over `plugin` and
+    # silently creates a mysql_native_password account, which MySQL 8.4 no
+    # longer supports. `plugin` alone, with no auth string, creates a
+    # PASSWORDLESS account -- both are always set together.
+    plugin: "{{ db_user_plugin }}"
+    plugin_auth_string: "{{ db_app_passwords[item.key] }}"
+    # Without a salt the module compares the stored hash against the plaintext,
+    # never matches, and re-issues ALTER USER on every converge.
+    salt: "{{ ((db_app_passwords[item.key] ~ item.key) | hash('sha256'))[:20] }}"
+    # Recomputed in full, never appended: a privilege dropped from the catalog
+    # has to actually disappear from the server.
+    priv: "{{ app_priv }}"
+    append_privs: false
+    state: present
+  vars:
+    app_priv: >-
+      {%- set parts = [] -%}
+      {%- set overrides = item.value.db_privileges | default({}) -%}
+      {%- for srv in item.value.connections.values() | unique | sort -%}
+      {%- set grant = overrides.get(srv, db_servers[srv].privileges
+                                    | default(db_privileges_default)) -%}
+      {%- set _ = parts.append(db_servers[srv].database ~ '.*:' ~ grant) -%}
+      {%- endfor -%}
+      {{ parts | join('/') }}
+  loop: "{{ db_apps }}"
+  loop_control:
+    label: "{{ db_user_prefix }}{{ item.key }}"
+  no_log: true
+
+- name: Accounts and grants
+  ansible.builtin.debug:
+    msg: >-
+      {{ db_user_prefix }}{{ item.key }}@{{ db_user_host }} :
+      {{ item.value.connections.values() | unique | sort
+         | map('extract', db_servers, 'database') | join(', ') }}
+  loop: "{{ db_apps }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Prune accounts no application claims
+  ansible.builtin.include_tasks: prune.yml
+  when: db_remove_unknown_users | bool
+
+# Proves the grant works, not merely that the GRANT was accepted. No login_db:
+# the schema may not exist yet.
+- name: Each account can connect
+  ansible.mysql.mysql_query:
+    login_host: "{{ db_servers[item.value.connections.values() | list | first].host }}"
+    login_port: "{{ db_servers[item.value.connections.values() | list | first].port }}"
+    login_user: "{{ db_user_prefix }}{{ item.key }}"
+    login_password: "{{ db_app_passwords[item.key] }}"
+    query: SELECT 1
+  loop: "{{ db_apps }}"
+  loop_control:
+    label: "{{ db_user_prefix }}{{ item.key }}"
+  changed_when: false
+  no_log: true

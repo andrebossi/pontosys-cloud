@@ -33,12 +33,6 @@ keyed_groups:
     prefix: env
     separator: "_"
 
-  # Instance pool membership: the canary and the stable pool are the same role
-  # but must be addressable separately during a release.
-  - key: freeform_tags['pscloud_pool'] | default('none')
-    prefix: pool
-    separator: "_"
-
 compose:
   ansible_host: private_ip
   oci_display_name: display_name

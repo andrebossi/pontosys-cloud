@@ -13,15 +13,15 @@
     update_cache: true
     cache_valid_time: 3600
 
-# These runtimes probe for libicuuc.so.<n> from 67 downwards and Ubuntu 24.04
-# ships 74, so the version has to be handed to them explicitly through
-# CLR_ICU_VERSION_OVERRIDE. Detected rather than hardcoded, so a distribution
-# upgrade does not silently break globalization on every app at once.
+# These runtimes probe libicuuc.so.<n> from 67 downwards and Ubuntu 24.04 ships
+# 74, so the version has to be handed over explicitly. Detected rather than
+# hardcoded, so a distribution upgrade does not silently break globalization on
+# every app at once.
 - name: Host ICU version
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail;
-      ls /usr/lib/x86_64-linux-gnu/libicuuc.so.* 2>/dev/null
+      ls /usr/lib/{{ ansible_architecture }}-linux-gnu/libicuuc.so.* 2>/dev/null
       | sed -E 's/.*libicuuc\.so\.([0-9]+).*/\1/' | sort -rn | head -1
     executable: /bin/bash
   register: host_icu
@@ -32,7 +32,7 @@
   ansible.builtin.set_fact:
     dotnet_host_icu_version: "{{ host_icu.stdout | trim }}"
 
-- name: OpenSSL 1.1 compatibility (private to the app units)
+- name: OpenSSL 1.1, private to the app units
   ansible.builtin.include_tasks: compat.yml
 
 - name: Runtimes

@@ -1,8 +1,7 @@
 ---
-# The .deb is UNPACKED, never installed. `apt install libssl1.1` would put an
-# end-of-life TLS library on the library search path of every process on the
-# box, including sshd and the agent. Here it is reachable only through
-# LD_LIBRARY_PATH on the .NET units.
+# The .deb is UNPACKED, never installed: `apt install libssl1.1` would put an
+# end-of-life TLS library on the search path of every process on the box, sshd
+# included. Here only the .NET units see it, through LD_LIBRARY_PATH.
 - name: Compatibility library directory
   ansible.builtin.file:
     path: "{{ dotnet_compat_dir }}/lib"
@@ -35,8 +34,8 @@
   when: compat_download is changed
   changed_when: true
 
-# Proves the unpack produced the sonames the runtime dlopens. Without this the
-# failure surfaces months later as a TLS handshake exception in one endpoint.
+# Without this the failure surfaces months later as a TLS handshake exception
+# in one endpoint.
 - name: Compatibility libraries are present
   ansible.builtin.stat:
     path: "{{ dotnet_compat_dir }}/lib/{{ item.1 }}"

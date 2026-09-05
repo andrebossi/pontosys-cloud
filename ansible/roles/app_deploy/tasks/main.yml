@@ -1,7 +1,7 @@
 ---
 # Normally resolved once by the "Resolve" play in deploy.yml. Re-resolved here
-# only when the role is used on its own -- during a Packer build, for example,
-# where there is a single builder and no serial rollout to keep consistent.
+# only when the role is used on its own -- during a Packer build, where there
+# is one builder and no serial rollout to keep consistent.
 - name: Resolve versions
   ansible.builtin.include_tasks: resolve.yml
   when: app_versions is not defined

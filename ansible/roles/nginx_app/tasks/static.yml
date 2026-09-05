@@ -1,28 +1,29 @@
 ---
-# The SPA bundles and the error pages, straight from the old machine's
-# document root. Copied with rsync semantics rather than `copy` so ~140 MB of
-# Flutter and Ionic assets are not hashed one file at a time on every run.
-- name: Document root
-  ansible.builtin.file:
-    path: "{{ nginx_static_root }}"
-    state: directory
-    owner: "{{ nginx_user }}"
-    group: "{{ nginx_user }}"
-    mode: "0755"
+# The SPA bundles and the error pages, as one artifact in the store. They are
+# build output, not configuration: they belong next to the application
+# tarballs, not in this repository. Publish with
+#   tar -C webroot -czf webroot.tar.gz . && pscloud push webroot <ver> ./webroot.tar.gz
+- name: Web root version
+  ansible.builtin.include_role:
+    name: artifact
+    tasks_from: latest.yml
+  vars:
+    artifact_names: ["{{ webroot_artifact }}"]
+  when: webroot_version == 'latest'
 
-- name: Error pages
-  ansible.builtin.copy:
-    src: "nginx/nginx-config/{{ item }}"
-    dest: "{{ nginx_static_root }}/{{ item }}"
-    owner: "{{ nginx_user }}"
-    group: "{{ nginx_user }}"
-    mode: "0644"
-  loop:
-    - 404.html
-    - 50x.html
-    - nginx-logo.png
+- name: Web root
+  ansible.builtin.include_role:
+    name: artifact
+    tasks_from: fetch.yml
+  vars:
+    artifact_name: "{{ webroot_artifact }}"
+    artifact_version: "{{ webroot_version if webroot_version != 'latest'
+                          else artifact_versions[webroot_artifact] }}"
+    artifact_dest: "{{ nginx_static_root }}"
+    artifact_owner: "{{ nginx_user }}"
+    artifact_group: "{{ nginx_user }}"
 
-# 404.html and 50x.html reference /poweredby.png. It was a symlink to
+# 404.html and 50x.html reference /poweredby.png, which was a symlink to
 # nginx-logo.png on the old machine; without it both pages render a broken
 # image.
 - name: poweredby.png
@@ -30,39 +31,4 @@
     path: "{{ nginx_static_root }}/poweredby.png"
     src: "{{ nginx_static_root }}/nginx-logo.png"
     state: link
-
-# rsync, not `copy`: ~140 MB across a few thousand files. `copy` checksums
-# every one of them on every run, over the jump host. `become` here makes
-# synchronize use `--rsync-path='sudo rsync'`, so the target needs passwordless
-# sudo -- which is what cloud-init sets up.
-#
-# delete: false on purpose. A file removed from the snapshot stays on the
-# machine; wiping the document root from the control node is not something a
-# routine converge should be able to do.
-- name: Static sites
-  ansible.posix.synchronize:
-    src: "{{ playbook_dir }}/files/nginx/nginx-config/{{ item }}"
-    dest: "{{ nginx_static_root }}/"
-    delete: false
-    rsync_opts:
-      - "--exclude=*.tar.gz"
-  loop:
-    - index.html
-    - manifest.json
-    - signalr_ponto_a.html
-    - app
-    - assets
-    - build
-    - icons
-    - monitorclientes
-  register: static_sync
-
-# Only after a sync actually moved something: a recursive chown over a few
-# thousand files on every converge is minutes of nothing.
-- name: Static content is readable by NGINX
-  ansible.builtin.file:
-    path: "{{ nginx_static_root }}"
-    owner: "{{ nginx_user }}"
-    group: "{{ nginx_user }}"
-    recurse: true
-  when: static_sync is changed
+    force: true

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Writes the instance's OCI identity to /run/instance.env, sourced by the
-# agent units. Runs at boot and before every fluent-bit start, so a VM that
-# was live-migrated to another fault domain relabels itself.
+# The instance's OCI identity, written to /run/instance.env and sourced by the
+# agent units. Runs at boot and before every fluent-bit start, so a VM that was
+# live-migrated to another fault domain relabels itself.
 set -euo pipefail
 
 MD=$(curl -sf --max-time 5 -H "Authorization: Bearer Oracle" \
@@ -15,7 +15,9 @@ MD=$(curl -sf --max-time 5 -H "Authorization: Bearer Oracle" \
   echo "FD=$(jq -r '.faultDomain // "unknown"' <<<"$MD")"
   echo "REGION=$(jq -r '.canonicalRegionName // "unknown"' <<<"$MD")"
   echo "ROLE=$(jq -r '.definedTags.pscloud.role // "unknown"' <<<"$MD")"
-  echo "POOL=$(jq -r '.metadata.pscloud_pool // "none"' <<<"$MD")"
+  # Written into the instance configuration by `pscloud image-release`: which
+  # golden image this VM booted from.
+  echo "RELEASE=$(jq -r '.metadata.pscloud_release // "unknown"' <<<"$MD")"
 } > /run/instance.env
 
 chmod 0644 /run/instance.env

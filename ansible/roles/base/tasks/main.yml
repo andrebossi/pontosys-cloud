@@ -10,6 +10,9 @@
     update_cache: true
     cache_valid_time: 3600
 
+- name: Accounts
+  ansible.builtin.include_tasks: users.yml
+
 - name: Kernel tuning
   ansible.posix.sysctl:
     name: "{{ item.key }}"
@@ -21,32 +24,97 @@
   loop_control:
     label: "{{ item.key }} = {{ item.value }}"
 
+# `always` makes the kernel hand out 2 MB pages the .NET GC did not ask for;
+# on a 6 GB box that inflates the resident set and stalls on compaction.
+# `madvise` keeps the win where it is asked for and nowhere else.
+- name: Transparent hugepages on madvise
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/thp-madvise.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Transparent hugepages on madvise
+      DefaultDependencies=no
+      After=sysinit.target local-fs.target
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/bin/sh -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/enabled'
+      ExecStart=/bin/sh -c 'echo madvise > /sys/kernel/mm/transparent_hugepage/defrag'
+
+      [Install]
+      WantedBy=basic.target
+  notify: reload systemd
+
+- name: Transparent hugepages setting applied
+  ansible.builtin.systemd:
+    name: thp-madvise.service
+    enabled: true
+    state: started
+    daemon_reload: true
+
+# The boot volume is paravirtualised and already queues on the hypervisor
+# side; a second scheduler in the guest only adds latency.
+- name: No guest I/O scheduler on virtual disks
+  ansible.builtin.copy:
+    dest: /etc/udev/rules.d/60-scheduler.rules
+    mode: "0644"
+    content: |
+      ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]n[0-9]", ATTR{queue/scheduler}="none"
+      ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]n[0-9]", ATTR{queue/read_ahead_kb}="256"
+  register: io_rules
+
+- name: Apply it now
+  ansible.builtin.command: udevadm trigger --subsystem-match=block
+  when: io_rules is changed
+  changed_when: true
+
 - name: Swap
   ansible.builtin.include_tasks: swap.yml
   when: swap_size_mb | int > 0
 
-- name: journald drop-in directory
-  ansible.builtin.file:
-    path: /etc/systemd/journald.conf.d
-    state: directory
-    mode: "0755"
-
-- name: journald limits
-  ansible.builtin.template:
-    src: journald.conf.j2
+- name: journald drop-in
+  ansible.builtin.copy:
     dest: /etc/systemd/journald.conf.d/10-pscloud.conf
     mode: "0644"
+    content: |
+      # {{ ansible_managed }}
+      [Journal]
+      {% for k, v in journald_settings.items() %}
+      {{ k }}={{ v }}
+      {% endfor %}
   notify: restart journald
 
-# Reads the instance metadata service and writes /run/instance.env, which
-# every agent unit sources. It is what puts the OCI identity -- instance name,
-# fault domain, role tag -- on each metric and log line without Ansible having
-# to bake anything machine-specific into the image.
+# The OCI Ubuntu image ships an INPUT chain ending in REJECT. This is what
+# cloud-init used to do; it belongs with the rest of the host configuration.
+- name: Inbound ports
+  ansible.builtin.iptables:
+    chain: INPUT
+    protocol: tcp
+    destination_port: "{{ item | string }}"
+    ctstate: NEW
+    jump: ACCEPT
+    action: insert
+    rule_num: "1"
+    comment: "pscloud {{ item }}"
+  loop: "{{ base_open_ports }}"
+  register: fw_rules
+
+- name: Rules survive a reboot
+  ansible.builtin.command: netfilter-persistent save
+  when: fw_rules is changed
+  changed_when: true
+
+# Reads the instance metadata service into /run/instance.env, which every
+# agent unit sources: the OCI identity ends up on each metric and log line
+# without anything machine-specific being baked into the image.
 - name: OCI identity script
   ansible.builtin.copy:
     src: oci-instance-label.sh
     dest: /usr/local/bin/oci-instance-label.sh
     mode: "0755"
+  notify: reload systemd
 
 - name: OCI identity unit
   ansible.builtin.copy:

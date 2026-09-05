@@ -9,20 +9,39 @@ app_tiers: {}
 dotnet_runtime_env: {}
 app_settings_common: {}
 app_settings: {}
-app_secrets_common: {}
-app_secrets: {}
+app_secret_refs: {}
 db_servers: {}
-db_connection_options: ""
+db_user_prefix: app_
+db_pool_max: 12
+
+# AllowPublicKeyRetrieval is what makes caching_sha2_password work over a
+# plaintext connection: without it the handshake fails with "Authentication
+# method 'caching_sha2_password' failed" and it looks like a wrong password.
+# It sends the password RSA-encrypted rather than in the clear, which is
+# acceptable inside a private subnet -- enabling TLS on the DB system and
+# moving to SslMode=Required is the better end state.
+db_connection_options: >-
+  persistsecurityinfo=True;SslMode=none;AllowPublicKeyRetrieval=True;
+  Convert Zero Datetime=true;Maximum Pool Size={{ db_pool_max }};
 
 # ASP.NET Core does not call sd_notify unless the app was built with
-# .UseSystemd(). Type=notify on an app that does not would make systemd wait
-# out TimeoutStartSec and then declare a working app failed. `exec` is the
-# honest default: it catches an exec failure but does not pretend to know when
-# the app is ready -- that is what the deploy health check is for.
+# .UseSystemd(). Type=notify on an app that was not would make systemd wait
+# out TimeoutStartSec and then declare a working app failed.
 app_systemd_type: exec
 
-# Set at the runtime layer; repeated here so the role can be used on its own.
+# Set at the runtime layer; repeated so the role can be used on its own.
 dotnet_root: /opt/dotnet
 dotnet_compat_dir: /opt/dotnet/compat
 dotnet_default_runtime: "5.0"
 dotnet_host_icu_version: "74"
+
+# The ceiling for the group, derived from the shape. Everything outside
+# apps.slice -- kernel, nginx, the agent, and the page cache that keeps .dll
+# reads off the disk -- is what apps_slice_reserve_mb holds back.
+apps_slice_reserve_mb: 1600
+apps_slice_memory_max: "{{ host_memory_mb - apps_slice_reserve_mb }}M"
+apps_slice_memory_high: "{{ ((host_memory_mb - apps_slice_reserve_mb) * 0.9) | int }}M"
+apps_slice_memory_swap_max: 1G
+# 85% of the box. The remaining 15% is what lets nginx answer and sshd accept
+# a login while the apps are pinned -- without it an incident is unreachable.
+apps_slice_cpu_quota: "{{ (host_vcpus * 100 * 0.85) | int }}%"

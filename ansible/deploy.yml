@@ -1,77 +1,72 @@
 ---
-# Application releases, and the image/canary drivers.
+# Install application versions on machines. Nothing here decides when to move
+# on -- that is a person, or a pipeline step waiting on one.
 #
-#   # rc: newest artifacts in the bucket, and record what landed
+#   # 1. rc: a few machines that are IN the production load balancer.
+#   #    Real traffic, real database, one blast radius.
 #   ansible-playbook deploy.yml -l env_rc
 #
-#   # prod: exactly what the manifest pins (promotion put it there)
-#   ansible-playbook deploy.yml -l env_prod
+#   # 2. it held up. Pin what rc validated as prod's target.
+#   ansible-playbook release.yml -e release_action=promote \
+#                                -e release_from_env=rc -e release_to_env=prod
+#
+#   # 3. canary: one prod machine, then the rest in batches.
+#   ansible-playbook deploy.yml -l env_prod --limit-file canary.txt
+#   ansible-playbook deploy.yml -l env_prod -e deploy_serial=25%
 #
 #   # one app
 #   ansible-playbook deploy.yml -l env_rc -e "deploy_apps=['pixapi']"
 #
 #   # rollback: re-deploy an older manifest
-#   ansible-playbook deploy.yml -l env_rc -e app_manifest=2026.09.10-2 \
-#                               -e app_version_source=manifest
-#
-#   # straight from GitHub, no CI round trip
-#   ansible-playbook deploy.yml -l 10.20.16.9 -e app_artifact_source=github \
-#                               -e app_version=2026.09.12-1
-#
-#   ansible-playbook deploy.yml -e image_action=release
-#   ansible-playbook deploy.yml -e canary_action=shift -e canary_percent=25
+#   ansible-playbook deploy.yml -l env_rc -e app_version_source=manifest \
+#                               -e app_manifest=2026.09.10-2
 
-# The `release` driver lives on the monitoring VM: it needs OCI credentials,
-# and the instance principal means there is no key on disk. Everything below
-# reaches it through delegate_to.
+# The CLI lives on the monitoring VM: it needs OCI credentials, and the
+# instance principal means there is no key on disk. Everything below reaches it
+# through delegate_to. Skipped entirely when artifact_store is local.
 - name: Release driver
   hosts: role_monitoring
   become: true
-  tags: [release, always]
+  tags: [always]
   roles:
-    - role: app_release
-      when: image_action is not defined and canary_action is not defined
+    - role: release
+      when: artifact_store == 'bucket'
 
 # Resolved for the whole fleet before any machine is touched, and NOT inside
-# the serial play below: with `serial: 1` every batch is its own play, so a
-# version source of `latest` would be re-resolved per machine and a publish
-# landing mid-rollout would split the pool across two versions.
+# the serial play below: with a serial rollout every batch is its own play, so
+# `latest` would be re-resolved per batch and a publish landing mid-rollout
+# would split the fleet across two versions.
 - name: Resolve the release
   hosts: role_app
   become: true
-  tags: [release]
   tasks:
     - name: Versions
       ansible.builtin.include_role:
         name: app_deploy
         tasks_from: resolve.yml
-      when: image_action is not defined and canary_action is not defined
 
 - name: Install it
   hosts: role_app
   become: true
-  # One VM at a time: the others keep serving while this one restarts, and a
-  # bad release stops at the first machine instead of all of them.
-  serial: 1
-  tags: [release]
+  # One VM at a time by default: the others keep serving while this one
+  # restarts, and a bad release stops at the first machine instead of all of
+  # them. `-e deploy_serial=25%` widens the batch once a canary has held.
+  serial: "{{ deploy_serial | default(1) }}"
   roles:
-    - role: app_deploy
-      when: image_action is not defined and canary_action is not defined
+    - app_deploy
 
-# After every machine is healthy, not before. A manifest written up front
-# would claim a release that a failed rollout never actually reached.
+# After every machine is healthy, not before: a manifest written up front would
+# claim a release that a failed rollout never reached.
 - name: Record what landed
   hosts: role_app
   become: true
-  tags: [release]
   tasks:
-    # delegate_to, not a play against role_monitoring: the facts that describe
-    # this rollout -- which environment, which versions -- live on the app
-    # hosts, and `-l env_rc` has already narrowed them correctly.
+    # delegate_to, not a play against role_monitoring: the facts describing this
+    # rollout live on the app hosts, and `-l env_rc` has already narrowed them.
     - name: Publish the manifest
       ansible.builtin.command:
         argv:
-          - /usr/local/bin/release
+          - /usr/local/bin/pscloud
           - publish
           - "{{ app_env }}"
           - --release
@@ -85,29 +80,10 @@
       run_once: true
       register: manifest_published
       changed_when: true
-      when:
-        - image_action is not defined
-        - canary_action is not defined
-        - app_manifest_write | bool
+      when: app_manifest_write | bool
 
     - name: What was recorded
       ansible.builtin.debug:
         msg: "{{ manifest_published.stdout_lines }}"
       run_once: true
       when: manifest_published is not skipped
-
-- name: Image
-  hosts: role_monitoring
-  become: true
-  tags: [image]
-  roles:
-    - role: app_image
-      when: image_action is defined
-
-- name: Canary
-  hosts: role_monitoring
-  become: true
-  tags: [canary]
-  roles:
-    - role: app_canary
-      when: canary_action is defined

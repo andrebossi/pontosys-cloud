@@ -1,0 +1,20 @@
+---
+applications: {}
+db_servers: {}
+db_user_prefix: app_
+# The app subnet is 10.20.16.0/20; a MySQL host pattern cannot express that
+# exactly, and this is far tighter than the '%' a hand-made account gets.
+db_user_host: "10.20.%"
+# MySQL 8.4 no longer ships mysql_native_password.
+db_user_plugin: caching_sha2_password
+db_privileges_default: SELECT,INSERT,UPDATE,DELETE,EXECUTE
+
+# MySQL accepts a grant on a schema that does not exist yet, so accounts can
+# be in place long before any data is.
+db_create_schemas: false
+db_schema_encoding: utf8mb4
+db_schema_collation: utf8mb4_unicode_ci
+
+# Off by default: it deletes credentials, and a --limit or a half-written
+# catalog would make it delete the wrong ones.
+db_remove_unknown_users: false

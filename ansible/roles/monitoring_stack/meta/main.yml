@@ -1,11 +1,5 @@
 ---
 dependencies:
-  - role: geerlingguy.docker
-    vars:
-      docker_install_compose_plugin: true
-      docker_install_compose: false
-      docker_users: []
-
   - role: robertdebock.fail2ban
     vars:
       fail2ban_bantime: 1h

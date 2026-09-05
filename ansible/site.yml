@@ -15,6 +15,21 @@
     - role: observability_agent
       tags: [observability]
 
+# Server-side, so one machine is enough -- and it has to be an application VM:
+# the NSG only lets the app tier reach the database on 3306. Runs before the
+# applications so a first converge does not start them against accounts that do
+# not exist yet.
+- name: Database accounts
+  hosts: role_app
+  become: true
+  gather_facts: false
+  tags: [db]
+  tasks:
+    - name: One account per application
+      ansible.builtin.include_role:
+        name: db_users
+      run_once: true
+
 - name: Application layer
   hosts: role_app
   become: true

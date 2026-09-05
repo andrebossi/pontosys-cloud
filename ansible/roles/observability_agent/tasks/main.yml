@@ -15,6 +15,22 @@
     state: present
     update_cache: true
 
+# Everything below layers a drop-in on the unit the package ships. Replacing
+# /lib/systemd/system/fluent-bit.service with our own copy would mask the
+# packaged unit: an upgrade that changes ExecStart or adds a dependency would
+# be silently ignored, and the mask would survive a purge of the package.
+- name: The package owns the unit
+  ansible.builtin.stat:
+    path: /lib/systemd/system/fluent-bit.service
+  register: vendor_unit
+  failed_when: not vendor_unit.stat.exists
+
+- name: No local copy shadowing it
+  ansible.builtin.file:
+    path: /etc/systemd/system/fluent-bit.service
+    state: absent
+  notify: restart fluent-bit
+
 - name: Service user
   ansible.builtin.user:
     name: fluent-bit
@@ -34,14 +50,14 @@
     - "{{ fluentbit_state_dir }}/storage"
     - "{{ fluentbit_textfile_dir }}"
 
-- name: Parsers configuration
+- name: Parsers
   ansible.builtin.template:
     src: parsers.yaml.j2
     dest: "{{ fluentbit_config_dir }}/parsers.yaml"
     mode: "0644"
   notify: reload fluent-bit
 
-- name: Helper scripts (Lua, exporters)
+- name: Lua scripts
   ansible.builtin.copy:
     src: "{{ item }}"
     dest: "{{ fluentbit_config_dir }}/{{ item }}"
@@ -49,9 +65,9 @@
   loop: "{{ fluentbit_extra_files }}"
   notify: reload fluent-bit
 
-# The node_exporter_metrics textfile collector reads this directory. It is
-# the bridge for what the agent doesn't collect on its own -- CPU and memory
-# per cgroup, which is where per-app throttling and OOM events show up.
+# The node_exporter_metrics textfile collector reads this directory. It is the
+# bridge for what the agent does not collect on its own: per-cgroup memory,
+# swap and pressure, which is where an approaching OOM shows up first.
 - name: Textfile exporters
   ansible.builtin.copy:
     src: "{{ item.src }}"
@@ -60,49 +76,47 @@
   loop: "{{ textfile_exporters }}"
   loop_control: { label: "{{ item.name }}" }
 
-- name: Exporters timer
+- name: Exporter units and timers
   ansible.builtin.copy:
-    dest: "/etc/systemd/system/textfile-{{ item.name }}.timer"
+    dest: "/etc/systemd/system/textfile-{{ item.0.name }}.{{ item.1 }}"
     mode: "0644"
     content: |
       [Unit]
-      Description=Textfile collection ({{ item.name }})
+      Description=Textfile collection ({{ item.0.name }})
 
+      {% if item.1 == 'timer' %}
       [Timer]
       OnBootSec=30s
-      OnUnitActiveSec={{ item.interval }}s
+      OnUnitActiveSec={{ item.0.interval }}s
 
       [Install]
       WantedBy=timers.target
-  loop: "{{ textfile_exporters }}"
-  loop_control: { label: "{{ item.name }}" }
-
-- name: Exporters unit
-  ansible.builtin.copy:
-    dest: "/etc/systemd/system/textfile-{{ item.name }}.service"
-    mode: "0644"
-    content: |
-      [Unit]
-      Description=Textfile collection ({{ item.name }})
-
+      {% else %}
       [Service]
       Type=oneshot
-      ExecStart=/usr/local/bin/{{ item.src }}
+      ExecStart=/usr/local/bin/{{ item.0.src }}
       Nice=10
       IOWeight=20
       MemoryMax=64M
-  loop: "{{ textfile_exporters }}"
-  loop_control: { label: "{{ item.name }}" }
+      {% endif %}
+  loop: "{{ textfile_exporters | product(['service', 'timer']) | list }}"
+  loop_control: { label: "textfile-{{ item.0.name }}.{{ item.1 }}" }
 
-- name: Agent unit
+- name: Drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/fluent-bit.service.d
+    state: directory
+    mode: "0755"
+
+- name: Agent drop-in
   ansible.builtin.template:
-    src: fluent-bit.service.j2
-    dest: /etc/systemd/system/fluent-bit.service
+    src: fluent-bit-dropin.conf.j2
+    dest: /etc/systemd/system/fluent-bit.service.d/10-pscloud.conf
     mode: "0644"
   notify: restart fluent-bit
 
-# validate runs before writing: an invalid config never reaches disk, so the
-# agent keeps running with the last good one instead of entering a restart loop.
+# validate runs before the file is written: an invalid configuration never
+# reaches disk, so the agent keeps running with the last good one.
 - name: Configuration
   ansible.builtin.template:
     src: fluent-bit.yaml.j2
@@ -125,8 +139,15 @@
     enabled: true
     daemon_reload: true
   loop: "{{ textfile_exporters }}"
-  loop_control:
-    label: "{{ item.name }}"
+  loop_control: { label: "{{ item.name }}" }
+
+- name: The drop-in layers over the packaged unit
+  ansible.builtin.command: systemctl cat fluent-bit.service
+  register: fb_unit
+  changed_when: false
+  failed_when: >-
+    '/lib/systemd/system/fluent-bit.service' not in fb_unit.stdout
+    or '10-pscloud.conf' not in fb_unit.stdout
 
 - name: Agent is serving
   ansible.builtin.uri:

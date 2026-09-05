@@ -1,0 +1,35 @@
+---
+# Local VMs. Static, because there is no metadata service to ask.
+#
+#   ansible-playbook -i inventory/local.yml site.yml
+#
+# Inventory hostnames are IP addresses, the same convention the OCI plugin
+# uses (hostname_format: private_ip). That is what lets monitoring_host --
+# `groups['role_monitoring'] | first` -- work identically in both places, with
+# no special case anywhere in the roles.
+#
+# Copy this file and edit the addresses; it is a template, not a live inventory.
+all:
+  vars:
+    # `ubuntu` for the first converge, on a fresh VM where roles/base has not
+    # created the accounts yet. After that, `deploy`:
+    #   ansible-playbook -i inventory/local.yml deploy.yml -u deploy
+    ansible_user: ubuntu
+    ansible_python_interpreter: /usr/bin/python3
+
+  children:
+    role_app:
+      hosts:
+        192.168.122.11:
+        192.168.122.12:
+
+    role_monitoring:
+      hosts:
+        192.168.122.10:
+
+    # Selects group_vars/env_local.yml, which is what switches the secret store
+    # and the artifact store off the cloud.
+    env_local:
+      children:
+        role_app:
+        role_monitoring:

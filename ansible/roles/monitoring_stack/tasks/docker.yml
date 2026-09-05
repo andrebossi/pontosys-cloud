@@ -1,0 +1,52 @@
+---
+# Docker straight from the upstream repository, with community.docker driving
+# it. Ubuntu's docker.io lags the compose plugin by enough that
+# docker_compose_v2 refuses to run against it.
+- name: Docker repository
+  ansible.builtin.deb822_repository:
+    name: docker
+    types: [deb]
+    uris: "https://download.docker.com/linux/ubuntu"
+    suites: "{{ ansible_distribution_release }}"
+    components: [stable]
+    architectures: ["{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_architecture] }}"]
+    signed_by: https://download.docker.com/linux/ubuntu/gpg
+    state: present
+
+- name: Engine and the compose plugin
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-compose-plugin
+    state: present
+    update_cache: true
+
+# The default json-file driver keeps every byte a container ever logged. On a
+# box whose whole job is storing other machines' telemetry, that is the first
+# thing to fill the disk.
+- name: Daemon configuration
+  ansible.builtin.copy:
+    dest: /etc/docker/daemon.json
+    mode: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "10m", "max-file": "3" },
+        "live-restore": true
+      }
+  notify: restart docker
+
+- name: Docker is running
+  ansible.builtin.systemd:
+    name: docker
+    state: started
+    enabled: true
+
+# community.docker talks to the socket through requests. Ubuntu 24.04 is
+# PEP 668, so it comes from apt rather than pip.
+- name: Python bindings community.docker needs
+  ansible.builtin.apt:
+    name: python3-requests
+    state: present

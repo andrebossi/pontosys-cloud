@@ -1,39 +1,75 @@
 ---
 # System.Drawing.Common on Linux is a thin wrapper over libgdiplus, which is
 # not a managed dependency: it is absent until installed, and its absence only
-# shows up when a report is rendered.
-- name: libgdiplus and its dependencies
+# surfaces when a report is rendered.
+- name: libgdiplus and fontconfig
   ansible.builtin.apt:
     name: "{{ dotnet_drawing_packages }}"
     state: present
     update_cache: true
     cache_valid_time: 3600
 
-- name: Fonts directory
-  ansible.builtin.file:
-    path: "{{ dotnet_fonts_dir }}"
-    state: directory
-    mode: "0755"
+# The faces are a bundle in the artifact store, not files in this repository:
+# they are licensed binaries, they change about once a decade, and they are
+# needed on the image as well as on a live machine. Publish with
+#   tar -C fonts -czf fonts.tar.gz . && pscloud push fonts 1 ./fonts.tar.gz
+- name: Font bundle version
+  ansible.builtin.include_role:
+    name: artifact
+    tasks_from: latest.yml
+  vars:
+    artifact_names: ["{{ fonts_artifact }}"]
+  when: fonts_version == 'latest'
 
-# Report layouts reference Arial, Tahoma and Orator by name. Without them
-# libgdiplus substitutes a default face, the metrics change, and invoices come
-# out with shifted columns -- a silent corruption, not an error.
-- name: Microsoft fonts
-  ansible.builtin.copy:
-    src: "fontes/{{ item }}"
-    dest: "{{ dotnet_fonts_dir }}/{{ item }}"
-    mode: "0644"
-  loop: "{{ dotnet_fonts }}"
-  register: fonts_copied
+- name: Fonts
+  ansible.builtin.include_role:
+    name: artifact
+    tasks_from: fetch.yml
+  vars:
+    artifact_name: "{{ fonts_artifact }}"
+    artifact_version: "{{ fonts_version if fonts_version != 'latest'
+                          else artifact_versions[fonts_artifact] }}"
+    artifact_dest: "{{ dotnet_fonts_dir }}"
+  register: fonts_installed
 
 - name: Rebuild the font cache
-  ansible.builtin.command: fc-cache -f "{{ dotnet_fonts_dir }}"
-  when: fonts_copied is changed
+  ansible.builtin.command: "fc-cache -f {{ dotnet_fonts_dir }}"
+  when: fonts_installed is changed
   changed_when: true
 
-- name: Fonts are resolvable by name
-  ansible.builtin.command: "fc-match {{ item }}"
-  loop: [Arial, Tahoma]
+- name: What fontconfig now knows about
+  ansible.builtin.command: "fc-list --format=%{file}\\n"
+  register: fc_files
+  changed_when: false
+
+# Unpacking a file into the directory is not the same as the system being able
+# to use it: fc-cache skips a bad file without an error.
+- name: Every expected face is in the font cache
+  ansible.builtin.assert:
+    that: dotnet_fonts | map('regex_replace', '^', dotnet_fonts_dir ~ '/')
+          | difference(fc_files.stdout_lines) | length == 0
+    fail_msg: >-
+      Missing from the font cache after unpacking {{ fonts_artifact }}:
+      {{ dotnet_fonts | map('regex_replace', '^', dotnet_fonts_dir ~ '/')
+         | difference(fc_files.stdout_lines) | join(', ') }}
+    quiet: true
+
+# fc-match always answers, so the answer is what has to be checked: a family
+# that is not installed resolves to DejaVu and the report renders with the
+# wrong metrics.
+- name: Each family resolves to one of our files
+  ansible.builtin.command: "fc-match --format=%{file} {{ item }}"
+  loop: "{{ dotnet_font_families }}"
   register: fc_match
   changed_when: false
-  failed_when: item | lower not in fc_match.stdout | lower
+  failed_when: not fc_match.stdout.startswith(dotnet_fonts_dir)
+
+- name: Bold and italic resolve to their own files, not a synthesised face
+  ansible.builtin.command: "fc-match --format=%{file} {{ item }}"
+  loop:
+    - "Arial:bold"
+    - "Arial:italic"
+    - "Tahoma:bold"
+  register: fc_match_styles
+  changed_when: false
+  failed_when: not fc_match_styles.stdout.startswith(dotnet_fonts_dir)

@@ -1,13 +1,12 @@
 ---
-# Version manifests: what an environment runs, and how a version crosses from
-# one environment to the next.
+# Version manifests. Runs on whichever host holds the OCI credentials -- the
+# monitoring VM in the cloud, the control node locally.
 #
-#   ansible-playbook release.yml                                  # rc, as it stands
-#   ansible-playbook release.yml -e release_action=show   -e release_from_env=prod
-#   ansible-playbook release.yml -e release_action=list   -e release_from_env=rc
+#   ansible-playbook release.yml                                   # rc, as it stands
+#   ansible-playbook release.yml -e release_action=show  -e release_from_env=prod
+#   ansible-playbook release.yml -e release_action=list  -e release_from_env=rc
 #
-#   # rc validated -> prod's target. Copies the app versions VERBATIM: the
-#   # point is that prod runs what rc tested, not a fresh "latest".
+#   # what rc validated becomes prod's target -- versions copied verbatim
 #   ansible-playbook release.yml -e release_action=promote \
 #                                -e release_from_env=rc -e release_to_env=prod
 #
@@ -15,18 +14,13 @@
 #   ansible-playbook release.yml -e release_action=rollback \
 #                                -e release_to_env=prod -e release_tag=2026.09.10-2-prod
 #
-# Then bake and roll out:
-#   cd packer && packer build ... app.pkr.hcl        # image from prod's manifest
-#   ansible-playbook deploy.yml -e image_action=release
-#   ansible-playbook deploy.yml -e canary_action=up
-#   ansible-playbook deploy.yml -e canary_action=shift -e canary_percent=25
-#   ansible-playbook deploy.yml -e canary_action=gate
-#   ansible-playbook deploy.yml -e canary_action=promote
-#   ansible-playbook deploy.yml -e image_action=prune
+# Golden images are not managed here. Packer builds one, and pointing the
+# instance pool at it is `app_image_id` in infra/live/<env>/app-tier -- a
+# reviewed Terraform change rather than an API call from a playbook.
 - name: Manifests
   hosts: role_monitoring
   become: true
   roles:
-    - role: app_release
+    - role: release
       vars:
         release_action: "{{ release_action | default('show') }}"

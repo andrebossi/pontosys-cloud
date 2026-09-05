@@ -1,4 +1,23 @@
 ---
+- name: The container limits fit the machine
+  ansible.builtin.assert:
+    that: container_mb <= monitoring_mem_budget_mb
+    fail_msg: >-
+      The container limits add up to {{ container_mb }} MB, over the
+      {{ monitoring_mem_budget_mb }} MB allocated to the monitoring stack on a
+      {{ (ansible_memtotal_mb / 1024) | round(1) }} GB machine that also runs
+      other things. Lower a limit or raise monitoring_mem_budget_mb.
+    success_msg: "{{ container_mb }} MB of {{ monitoring_mem_budget_mb }} MB allocated"
+    quiet: true
+  vars:
+    container_mb: >-
+      {{ [vm_mem_limit, vl_mem_limit, vmalert_mem_limit,
+          alertmanager_mem_limit, grafana_mem_limit]
+         | map('human_to_bytes') | sum // 1048576 }}
+
+- name: Docker
+  ansible.builtin.include_tasks: docker.yml
+
 - name: Stack directories
   ansible.builtin.file:
     path: "{{ item.path }}"

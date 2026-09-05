@@ -1,23 +1,48 @@
 ---
 dotnet_root: /opt/dotnet
 dotnet_compat_dir: /opt/dotnet/compat
-dotnet_runtimes: {}
-dotnet_compat_packages: []
-dotnet_drawing_packages: []
-dotnet_fonts: []
 dotnet_fonts_dir: /usr/local/share/fonts/msttcore
 
-# Where the tarballs come from. dotnetcli.azureedge.net was retired in 2024;
-# this is the current CDN and it still serves out-of-support versions.
+dotnet_runtimes: {}
+dotnet_compat_packages: []
+dotnet_fonts: []
+
+# The font bundle in the artifact store. `latest` resolves at converge time;
+# pin a version to make a build reproducible.
+fonts_artifact: fonts
+fonts_version: latest
+
+# dotnetcli.azureedge.net was retired in 2024; this CDN still serves
+# out-of-support versions.
 dotnet_download_base: https://builds.dotnet.microsoft.com/dotnet
 
-# Install the ASP.NET Core runtime, not the base one: it carries both shared
-# frameworks (Microsoft.NETCore.App and Microsoft.AspNetCore.App) plus the
-# host, which is exactly what a framework-dependent web app needs and nothing
-# more. The SDK is deliberately absent -- nothing compiles on this box.
+# The OCI application VMs are x86_64; a local test VM on an ARM laptop is not.
+# Everything architecture-specific -- the runtime tarball, the OpenSSL .deb,
+# the multiarch library directory -- derives from this one fact.
+dotnet_arch: "{{ {'x86_64': 'x64', 'aarch64': 'arm64'}[ansible_architecture] }}"
+deb_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_architecture] }}"
+
+# The ASP.NET Core runtime, not the base one: it carries both shared
+# frameworks plus the host, which is exactly what a framework-dependent web
+# app needs. The SDK is deliberately absent -- nothing compiles on this box.
 dotnet_package: aspnetcore-runtime
 
-# Any app on the host needs System.Drawing support. Computed by the role from
-# the catalog, but overridable for the golden image, which bakes it in
-# unconditionally.
+dotnet_drawing_packages:
+  - libgdiplus
+  - libc6-dev
+  - libx11-6
+  - fontconfig
+
+# The families the report layouts ask for BY NAME, as they are actually
+# recorded in the fonts bundle in the artifact store. Orator's family is
+# "Orator10 BT", not "Orator": a layout asking for the latter silently gets a
+# substitute face and the invoice comes out with shifted columns.
+dotnet_font_families:
+  - Arial
+  - Arial Black
+  - Tahoma
+  - Orator10 BT
+
+# Computed from the catalog, but overridable: the golden image bakes drawing
+# support in unconditionally.
 dotnet_install_drawing: "{{ applications | default({}) | dict2items | selectattr('value.drawing', 'defined') | selectattr('value.drawing') | list | length > 0 }}"

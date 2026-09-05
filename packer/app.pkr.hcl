@@ -1,24 +1,41 @@
+# Golden image for the application layer.
+#
+# The build does nothing itself: it boots a stock Ubuntu, hands the instance to
+# ansible/image.yml, and captures the result. Every decision about what goes on
+# the machine lives in Ansible.
+#
+#   cd packer && packer init . && packer build app.pkr.hcl
+#
+# Run it from the monitoring VM: its instance principal is what mints the
+# artifact download URLs, and it is already the Ansible executor.
+
 packer {
   required_plugins {
-    oracle = {
-      source  = "github.com/hashicorp/oracle"
-      version = "~> 1.1"
-    }
-    ansible = {
-      source  = "github.com/hashicorp/ansible"
-      version = "~> 1.1"
-    }
+    oracle  = { source = "github.com/hashicorp/oracle", version = "~> 1.1" }
+    ansible = { source = "github.com/hashicorp/ansible", version = "~> 1.1" }
   }
 }
 
-variable "compartment_ocid" { type = string }
-variable "subnet_ocid" { type = string }
-variable "nsg_ocid" { type = string }
-variable "availability_domain" { type = string }
-
-variable "base_os_version" {
+variable "compartment_ocid" {
   type    = string
-  default = "24.04"
+  default = env("OCI_COMPARTMENT_OCID")
+}
+
+variable "subnet_ocid" {
+  type    = string
+  default = env("OCI_SUBNET_OCID")
+}
+
+variable "availability_domain" {
+  type    = string
+  default = env("OCI_AVAILABILITY_DOMAIN")
+}
+
+# Which environment's manifest the applications come from. The image is a
+# function of this repository plus that manifest.
+variable "manifest_env" {
+  type    = string
+  default = "prod"
 }
 
 variable "shape" {
@@ -36,38 +53,15 @@ variable "memory_in_gbs" {
   default = 6
 }
 
-variable "release_id" {
-  type    = string
-  default = ""
-}
-
-# Which environment's manifest the image is built from. The image is a
-# function of this repository plus that manifest -- never a snapshot of a
-# machine that has served traffic.
-variable "manifest_env" {
-  type    = string
-  default = "prod"
-}
-
-# Bake the applications in. false produces a base-layer-only image: the
-# runtimes, nginx, the agent and the unit files, with no application code.
-variable "bake_apps" {
-  type    = bool
-  default = true
-}
-
 locals {
-  release = var.release_id != "" ? var.release_id : formatdate("YYYYMMDD-hhmmss", timestamp())
+  release = formatdate("YYYYMMDD-hhmmss", timestamp())
 }
 
 source "oracle-oci" "app" {
-  availability_domain     = var.availability_domain
-  compartment_ocid        = var.compartment_ocid
-  subnet_ocid             = var.subnet_ocid
-  use_private_ip          = true
-  create_vnic_details {
-    nsg_ids = [var.nsg_ocid]
-  }
+  compartment_ocid    = var.compartment_ocid
+  availability_domain = var.availability_domain
+  subnet_ocid         = var.subnet_ocid
+  use_private_ip      = true
 
   shape = var.shape
   shape_config {
@@ -77,27 +71,20 @@ source "oracle-oci" "app" {
 
   base_image_filter {
     operating_system         = "Canonical Ubuntu"
-    operating_system_version = var.base_os_version
+    operating_system_version = "24.04"
     shape                    = var.shape
   }
 
   ssh_username = "ubuntu"
+  image_name   = "pscloud-app-${local.release}"
 
-  image_name = "pscloud-app-${local.release}"
-
+  # `pscloud images` lists on these, and `pscloud image-prune` protects what an
+  # instance pool references.
   tags = {
     pscloud_family   = "app"
     pscloud_built_by = "packer"
     pscloud_release  = local.release
-    pscloud_base_os  = var.base_os_version
-    # Which manifest went in. `image prune` protects images an instance pool
-    # references; this is what lets a human tell two builds apart.
     pscloud_manifest = var.manifest_env
-    pscloud_has_apps = tostring(var.bake_apps)
-  }
-
-  instance_tags = {
-    pscloud_built_by = "packer"
   }
 }
 
@@ -116,17 +103,14 @@ build {
     playbook_file = "${path.root}/../ansible/image.yml"
     user          = "ubuntu"
     extra_arguments = [
-      "--extra-vars",
-      "packer_build=true release_id=${local.release} image_manifest_env=${var.manifest_env} image_bake_apps=${var.bake_apps}",
+      "--extra-vars", "image_manifest_env=${var.manifest_env} app_release_tag=${local.release}",
       "--scp-extra-args", "-O",
     ]
   }
 
   post-processor "manifest" {
-    output     = "${path.root}/manifest.json"
-    strip_path = true
-    custom_data = {
-      release = local.release
-    }
+    output      = "${path.root}/manifest.json"
+    strip_path  = true
+    custom_data = { release = local.release }
   }
 }

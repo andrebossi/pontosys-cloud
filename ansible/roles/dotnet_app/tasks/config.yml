@@ -1,8 +1,13 @@
 ---
+- name: Credentials
+  ansible.builtin.include_role:
+    name: secrets
+  when: db_app_passwords is not defined
+
 # Non-secret configuration. .NET reads appsettings.json out of the artifact
-# first and then overlays appsettings.<Environment>.json, so this file changes
-# behaviour without the artifact having to be rebuilt. It lives in shared/ and
-# is symlinked into each release by the deploy.
+# first and overlays appsettings.Production.json, so this changes behaviour
+# without the artifact being rebuilt. It lives in shared/ and is symlinked
+# into each release by the deploy.
 - name: Application settings
   ansible.builtin.template:
     src: appsettings.json.j2
@@ -16,13 +21,9 @@
     label: "{{ item.key }}"
   register: app_settings_written
 
-# The only place on the machine where a password appears: 0640 root:dotnetapp.
-# It is not in the artifact, not in the image, not in git, and does not show
-# up in `systemctl show` -- environment files are read by PID 1, not exported
-# into the unit's visible properties.
-#
-# Environment configuration outranks every JSON file in .NET, so anything here
-# wins over appsettings.
+# The only place on the machine where a password appears. Not in the artifact,
+# not in the image, not in git, and not in `systemctl show` -- environment
+# files are read by PID 1, not exported into the unit's visible properties.
 - name: Secret environment file
   ansible.builtin.template:
     src: app.env.j2
@@ -46,8 +47,8 @@
     label: "{{ item.key }}"
 
 # An application with no `current` symlink has never been deployed. Its unit
-# fails AssertPathExists on purpose, so it is left alone here rather than
-# turning a pending deploy into a failed play.
+# fails AssertPathExists on purpose, so it is left alone rather than turning a
+# pending deploy into a failed play.
 - name: Which applications have an artifact
   ansible.builtin.stat:
     path: "{{ app_deploy_root }}/{{ item.key }}/current"
@@ -64,8 +65,7 @@
     apps_changed: >-
       {{ (app_settings_written.results + app_env_written.results
           + app_runtime_dropin.results + app_limits_dropin.results)
-         | selectattr('changed')
-         | map(attribute='item.key') | unique | list }}
+         | selectattr('changed') | map(attribute='item.key') | unique | list }}
 
 - name: Deployed applications are running
   ansible.builtin.systemd:
@@ -73,8 +73,8 @@
     state: started
   loop: "{{ apps_deployed }}"
 
-# Restart only what changed. A handler would restart all of them, and an
-# env-file edit on the reports API must not bounce the payment API.
+# Restart only what changed: an env-file edit on the reports API must not
+# bounce the payment API, which a handler would.
 - name: Restart the applications whose configuration changed
   ansible.builtin.systemd:
     name: "dotnet-app@{{ item }}.service"

@@ -1,0 +1,38 @@
+---
+# Only accounts carrying db_user_prefix are considered: an operator login, a
+# replication account or the admin itself must survive a run with an
+# incomplete catalog.
+- name: Accounts under {{ db_user_prefix }}
+  ansible.mysql.mysql_query:
+    login_host: "{{ db_admin.host }}"
+    login_port: "{{ db_admin.port }}"
+    login_user: "{{ db_admin.username }}"
+    login_password: "{{ db_admin_password }}"
+    query: >-
+      SELECT user FROM mysql.user
+      WHERE user LIKE CONCAT(%(prefix)s, '%%') AND host = %(host)s
+    named_args:
+      prefix: "{{ db_user_prefix }}"
+      host: "{{ db_user_host }}"
+  register: existing_users
+  changed_when: false
+  no_log: true
+
+- name: Which of them no application claims
+  ansible.builtin.set_fact:
+    orphan_users: >-
+      {{ (existing_users.query_result | first | map(attribute='user') | list)
+         | difference(db_apps | map(attribute='key')
+                      | map('regex_replace', '^', db_user_prefix) | list) }}
+
+- name: Remove them
+  ansible.mysql.mysql_user:
+    login_host: "{{ db_admin.host }}"
+    login_port: "{{ db_admin.port }}"
+    login_user: "{{ db_admin.username }}"
+    login_password: "{{ db_admin_password }}"
+    name: "{{ item }}"
+    host: "{{ db_user_host }}"
+    state: absent
+  loop: "{{ orphan_users }}"
+  no_log: true

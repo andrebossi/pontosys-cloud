@@ -7,43 +7,57 @@ observability_dir: /opt/observability
 grafana_log_dir: /var/log/grafana
 
 # ---------------------------------------------------------------------------
-# 60 GB BUDGET FOR THE BACKENDS
+# THE MACHINE: 12 GB, arm64, and it is not dedicated to this.
 #
-#   VictoriaMetrics   20 GB   (-storage.maxDiskSpaceUsageBytes)
-#   VictoriaLogs      30 GB   (-retention.maxDiskSpaceUsageBytes)
-#   headroom          10 GB   merge/compaction needs free space; without
-#                             headroom the VM enters read-only mode
+#   monitoring stack     6.0 GB   the container limits below, plus headroom
+#   RustDesk + desktop  ~2.0 GB
+#   OS, docker, agent   ~1.0 GB
+#   page cache          ~3.0 GB   what VictoriaMetrics and VictoriaLogs lean
+#                                 on hardest -- both are mmap-based, and their
+#                                 read path is the page cache
+#
+# The limits below sum to 5.2 GB, which is the 6 GB allocation minus room for
+# docker's own overhead and a restart overlapping a running container.
+#
+# -memory.allowedBytes is MANDATORY on both VictoriaMetrics and VictoriaLogs:
+# the default (-memory.allowedPercent 60) is computed against the HOST's RAM,
+# not the container limit. Inside a 2 GB container the process would think it
+# can use 7.2 GB and get killed by the cgroup OOM killer. Each is set to ~70%
+# of its own limit, leaving the rest for Go's non-heap allocations.
+#
+# Every image here publishes a linux/arm64 manifest, so nothing is pinned to a
+# platform -- the daemon picks. The docker apt repository is the one place the
+# architecture had to be derived rather than assumed; see roles/monitoring_stack.
+# ---------------------------------------------------------------------------
+# Asserted against the sum of the container limits, so an edit that quietly
+# overcommits the machine fails the converge instead of the OOM killer.
+monitoring_mem_budget_mb: 6144
+
+vm_mem_limit: 2G
+vm_mem_allowed: 1400MB
+vm_cpus: "1.0"
+vm_max_queries: 4
+
+vl_mem_limit: 2G
+vl_mem_allowed: 1400MB
+vl_cpus: "0.8"
+
+vmalert_mem_limit: 256M
+alertmanager_mem_limit: 192M
+grafana_mem_limit: 768M
+
+# ---------------------------------------------------------------------------
+# DISK
+#
+# Both are hard ceilings, not targets. Leave at least 20% of the filesystem
+# free on top of these: merges and compaction need scratch space, and without
+# it VictoriaMetrics drops into read-only mode -- which looks exactly like the
+# fleet having gone quiet.
 # ---------------------------------------------------------------------------
 vm_max_disk: 20GB
 vm_retention: 3m
 vl_max_disk: 30GB
 vl_retention: 30d
-
-# ---------------------------------------------------------------------------
-# MEMORY BUDGET — 8 GB VM
-#
-#   containers  ~2.5 GB  (limits below)
-#   OS + fluent-bit + nginx + docker  ~0.8 GB
-#   = ~4.7 GB free for page cache, which is what VictoriaMetrics and
-#     VictoriaLogs rely on the most (mmap-based storage).
-#
-# -memory.allowedBytes is MANDATORY on both: the default (-memory.allowedPercent
-# 60) is computed against the HOST's RAM, not the container's limit. Inside a
-# 1 GB container the process would think it can use 4.8 GB and get killed by
-# the cgroup's OOM killer.
-# ---------------------------------------------------------------------------
-vm_mem_limit: 1G
-vm_mem_allowed: 700MB
-vm_cpus: "0.6"
-vm_max_queries: 4
-
-vl_mem_limit: 800M
-vl_mem_allowed: 550MB
-vl_cpus: "0.5"
-
-vmalert_mem_limit: 128M
-alertmanager_mem_limit: 128M
-grafana_mem_limit: 400M
 
 # monitoring_fqdn: grafana.example.com
 # grafana_admin_password: set this in host_vars with Ansible Vault.
@@ -89,3 +103,6 @@ fluentbit_extra_filters:
 # On this VM the backends are local. Sending to 127.0.0.1 means the machine's
 # own telemetry does not depend on the network it is there to observe.
 monitoring_host: 127.0.0.1
+
+# Ingest from the fleet, and Grafana. Everything else stays closed.
+base_open_ports: [8428, 9428, 3000]

@@ -130,12 +130,6 @@ variable "freeform_tags" {
   default = {}
 }
 
-variable "tag_namespace" {
-  description = "Namespace for defined tags. Used by cloud-init to discover the instance's role."
-  type        = string
-  default     = "pscloud"
-}
-
 variable "autoscaling" {
   description = "Scales the stable pool on CPU. Null disables it and the pool stays at pool_min_size."
   type = object({

@@ -1,6 +1,6 @@
 ---
-# One install root per runtime. See the comment on dotnet_runtimes in
-# group_vars/role_app/runtime.yml for why they are not stacked in one root.
+# One install root per runtime -- see dotnet_runtimes in
+# group_vars/role_app/platform.yml for why they are not stacked.
 - name: "{{ rt.value.version }} — install root"
   ansible.builtin.file:
     path: "{{ dotnet_root }}/{{ rt.value.version }}"
@@ -9,7 +9,7 @@
 
 - name: "{{ rt.value.version }} — ASP.NET Core runtime"
   ansible.builtin.unarchive:
-    src: "{{ dotnet_download_base }}/aspnetcore/Runtime/{{ rt.value.version }}/{{ dotnet_package }}-{{ rt.value.version }}-linux-x64.tar.gz"
+    src: "{{ dotnet_download_base }}/aspnetcore/Runtime/{{ rt.value.version }}/{{ dotnet_package }}-{{ rt.value.version }}-linux-{{ dotnet_arch }}.tar.gz"
     dest: "{{ dotnet_root }}/{{ rt.value.version }}"
     remote_src: true
     creates: "{{ dotnet_root }}/{{ rt.value.version }}/shared/Microsoft.AspNetCore.App/{{ rt.value.version }}"
@@ -26,9 +26,9 @@
     ('Microsoft.AspNetCore.App ' ~ rt.value.version) not in dotnet_listed.stdout
     or ('Microsoft.NETCore.App ' ~ rt.value.version) not in dotnet_listed.stdout
 
-# The root must hold exactly ONE version of each shared framework. If a second
-# one appears, an app without an explicit rollforward policy can silently bind
-# to it, and the isolation this layout exists for is gone.
+# Exactly ONE version of each shared framework per root: if a second appears,
+# an app without a rollforward policy can silently bind to it and the isolation
+# is gone.
 - name: "{{ rt.value.version }} — the root is isolated to one version"
   ansible.builtin.find:
     paths: "{{ dotnet_root }}/{{ rt.value.version }}/shared/Microsoft.NETCore.App"
@@ -37,8 +37,8 @@
   changed_when: false
   failed_when: dotnet_frameworks.files | length != 1
 
-# The crypto shim resolves OpenSSL at dlopen time. This checks the binary
-# actually asks for the 1.x soname we staged, rather than assuming it.
+# The crypto shim resolves OpenSSL at dlopen time; this checks it really asks
+# for the soname we staged.
 - name: "{{ rt.value.version }} — crypto shim targets the staged OpenSSL"
   ansible.builtin.shell:
     cmd: >-

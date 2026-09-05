@@ -1,0 +1,63 @@
+---
+# Fetch artifacts/<artifact_name>/<artifact_name>-<artifact_version>.tar.gz and
+# unpack it into artifact_dest. Callers set:
+#
+#   artifact_name  artifact_version  artifact_dest
+#   artifact_owner artifact_group    artifact_creates   (optional)
+#
+# Apps, the font bundle and the web root all come through here, so `local`
+# needs to work in exactly one place for all three.
+- name: "{{ artifact_name }} — destination"
+  ansible.builtin.file:
+    path: "{{ artifact_dest }}"
+    state: directory
+    owner: "{{ artifact_owner }}"
+    group: "{{ artifact_group }}"
+    mode: "0755"
+
+- name: "{{ artifact_name }} {{ artifact_version }} — from the bucket"
+  when: artifact_store == 'bucket'
+  block:
+    # The targets hold no credential for Object Storage and have no OCI
+    # tooling. The release host mints a read-only, single-object, short-lived
+    # URL and the target fetches it over plain HTTP.
+    - name: "{{ artifact_name }} — download URL"
+      ansible.builtin.command: >-
+        /usr/local/bin/pscloud par
+        artifacts/{{ artifact_name }}/{{ artifact_name }}-{{ artifact_version }}.tar.gz
+        --ttl {{ artifact_par_ttl }}
+      delegate_to: "{{ app_release_host }}"
+      register: artifact_par
+      changed_when: false
+      no_log: true
+
+    # Fetched by the target itself, not streamed through the SSH connection:
+    # a publish tree is tens of megabytes.
+    - name: "{{ artifact_name }} — download"
+      ansible.builtin.get_url:
+        url: "{{ artifact_par.stdout | trim }}"
+        dest: "{{ artifact_tmp }}"
+        mode: "0640"
+      no_log: true
+
+- name: "{{ artifact_name }} {{ artifact_version }} — from {{ local_artifact_dir }}"
+  ansible.builtin.copy:
+    src: "{{ local_artifact_dir }}/{{ artifact_name }}/{{ artifact_name }}-{{ artifact_version }}.tar.gz"
+    dest: "{{ artifact_tmp }}"
+    mode: "0640"
+  when: artifact_store == 'local'
+
+- name: "{{ artifact_name }} — unpack"
+  ansible.builtin.unarchive:
+    src: "{{ artifact_tmp }}"
+    dest: "{{ artifact_dest }}"
+    remote_src: true
+    owner: "{{ artifact_owner }}"
+    group: "{{ artifact_group }}"
+    extra_opts: [--no-same-owner]
+    creates: "{{ artifact_creates | default('', true) or omit }}"
+
+- name: "{{ artifact_name }} — drop the archive"
+  ansible.builtin.file:
+    path: "{{ artifact_tmp }}"
+    state: absent

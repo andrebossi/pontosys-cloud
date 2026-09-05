@@ -24,15 +24,6 @@ locals {
     if !can(regex("Minimal|GPU", image.display_name))
   ][0]
 
-  user_data = templatefile("${path.module}/../cloud-init/common.yaml.tftpl", {
-    hostname              = "${var.label_prefix}-app"
-    dns_domain            = "vcn.oraclevcn.com"
-    role                  = "app"
-    allow_port            = var.backend_port
-    tag_namespace         = var.tag_namespace
-    install_base_packages = false
-  })
-
   pools = {
     stable = var.stable_fault_domains
     canary = var.canary_fault_domains
@@ -145,9 +136,13 @@ resource "oci_core_instance_configuration" "baseline" {
         nsg_ids          = var.app_nsg_ids
       }
 
+      # No user_data. The golden image already carries the host
+      # configuration -- the firewall rule, the instance-identity unit and the
+      # agent -- applied by ansible/roles/base. A cloud-init copy of the same
+      # thing would be a second definition to keep in step, and it would only
+      # ever run on first boot.
       metadata = {
         ssh_authorized_keys = var.ssh_public_key
-        user_data           = base64encode(local.user_data)
       }
 
       agent_config {

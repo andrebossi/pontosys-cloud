@@ -5,49 +5,32 @@
     app_ver: "{{ app_versions[app_name] }}"
     app_home: "{{ app_deploy_root }}/{{ app_name }}"
     release_dir: "{{ app_deploy_root }}/{{ app_name }}/releases/{{ app_versions[app_name] }}"
-    artifact_local: "/var/cache/{{ app_name }}-{{ app_versions[app_name] }}.tar.gz"
-    artifact_object: "artifacts/{{ app_name }}/{{ app_name }}-{{ app_versions[app_name] }}.tar.gz"
-    gh_owner: "{{ app.artifact.owner | default(app_artifact.owner) }}"
-    gh_repo: "{{ app.artifact.repo | default(app_artifact.repo) }}"
-    gh_asset: "{{ app.artifact.asset | default(app_name ~ app_artifact.asset_suffix) }}"
   block:
 
-    - name: "{{ app_name }} — release directory"
-      ansible.builtin.file:
-        path: "{{ release_dir }}"
-        state: directory
-        owner: "{{ app_deploy_user }}"
-        group: "{{ app_deploy_user }}"
-        mode: "0755"
-
-    # Fetched by the target itself, not streamed through the SSH connection:
-    # a publish tree is tens of megabytes per app.
-    - name: "{{ app_name }} — fetch the artifact"
-      ansible.builtin.include_tasks: "fetch_{{ app_artifact_source }}.yml"
-
-    - name: "{{ app_name }} — unpack"
-      ansible.builtin.unarchive:
-        src: "{{ artifact_local }}"
-        dest: "{{ release_dir }}"
-        remote_src: true
-        owner: "{{ app_deploy_user }}"
-        group: "{{ app_deploy_user }}"
-        extra_opts: [--no-same-owner]
-        creates: "{{ release_dir }}/{{ app.dll }}"
+    - name: "{{ app_name }} — fetch and unpack {{ app_ver }}"
+      ansible.builtin.include_role:
+        name: artifact
+        tasks_from: fetch.yml
+      vars:
+        artifact_name: "{{ app_name }}"
+        artifact_version: "{{ app_ver }}"
+        artifact_dest: "{{ release_dir }}"
+        artifact_owner: "{{ app_deploy_user }}"
+        artifact_group: "{{ app_deploy_user }}"
+        artifact_creates: "{{ release_dir }}/{{ app.dll }}"
 
     # A tarball built from the parent directory unpacks one level too deep and
-    # the assembly lands at releases/<ver>/publish/App.dll. Caught here, with
-    # a message that says so, instead of as an opaque unit failure after the
-    # switch. Package with: tar -C bin/Release/net5.0/publish -czf app.tar.gz .
+    # the assembly lands at releases/<ver>/publish/App.dll. Caught here, with a
+    # message that says so, instead of as an opaque unit failure after the
+    # switch. Pack with: tar -C bin/Release/net5.0/publish -czf app.tar.gz .
     - name: "{{ app_name }} — the entry assembly is where the unit expects it"
       ansible.builtin.stat:
         path: "{{ release_dir }}/{{ app.dll }}"
       register: entry_dll
       failed_when: not entry_dll.stat.exists
 
-    # State that must outlive the release: client certificates, generated
-    # reports, fiscal tables. The release tree is otherwise immutable, so
-    # these are links out of it into shared/.
+    # State that outlives the release: client certificates, generated reports,
+    # fiscal tables. The release tree is otherwise immutable.
     - name: "{{ app_name }} — link persistent directories"
       ansible.builtin.file:
         path: "{{ release_dir }}/{{ item }}"
@@ -98,13 +81,12 @@
       when: not app_bake | bool
 
     # Type=exec reports "started" as soon as execve succeeds, which says
-    # nothing about whether Kestrel is listening. This is the check that
-    # decides whether the deploy worked.
+    # nothing about whether Kestrel is listening. Any HTTP response proves the
+    # listener is up: a 404 on / is a working API with no route there, a
+    # refused connection is a dead app.
     - name: "{{ app_name }} — answers on 127.0.0.1:{{ app.port }}"
       ansible.builtin.uri:
         url: "http://127.0.0.1:{{ app.port }}{{ app_deploy_health_path }}"
-        # Any HTTP response proves the listener is up. A 404 on / is a working
-        # API with no route there; a refused connection is a dead app.
         status_code: [200, 201, 204, 301, 302, 400, 401, 403, 404, 405]
       register: app_health
       retries: "{{ app_deploy_health_retries }}"
@@ -122,14 +104,9 @@
         executable: /bin/bash
       changed_when: true
 
-    - name: "{{ app_name }} — drop the downloaded archive"
-      ansible.builtin.file:
-        path: "{{ artifact_local }}"
-        state: absent
-
   rescue:
-    # Automatic, because the alternative is leaving a broken release live
-    # while someone reads the error.
+    # Automatic: the alternative is leaving a broken release live while
+    # someone reads the error.
     - name: "{{ app_name }} — roll back to {{ previous_release | default('(nothing)') }}"
       ansible.builtin.file:
         path: "{{ app_home }}/current"

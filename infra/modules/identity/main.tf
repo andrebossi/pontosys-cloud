@@ -82,6 +82,16 @@ locals {
       "to read secret-bundles in compartment id ${local.c}",
     ]
 
+    # The Ansible executor generates database passwords and writes them to the
+    # vault. `use keys` and `use vaults` are what let it encrypt a new secret;
+    # without them `manage secret-family` creates nothing.
+    manage_secrets = [
+      "to manage secret-family in compartment id ${local.c}",
+      "to read secret-bundles in compartment id ${local.c}",
+      "to use keys in compartment id ${local.c}",
+      "to use vaults in compartment id ${local.c}",
+    ]
+
     read_inventory = [
       "to read instance-family in compartment id ${local.c}",
       "to read virtual-network-family in compartment id ${local.c}",

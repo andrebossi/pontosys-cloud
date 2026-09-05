@@ -3,21 +3,17 @@ fluentbit_config_dir: /etc/fluent-bit
 fluentbit_state_dir: /var/lib/fluent-bit
 fluentbit_textfile_dir: /var/lib/node_exporter/textfile
 
-# The agent is a tenant on this box, not the point of it. 96 MB and 15% of one
-# core is enough for ~30 series/s plus two tail inputs, and it is capped so a
-# backend outage -- when the buffers fill -- cannot push the applications into
-# reclaim.
+# The agent is a tenant on this box, not the point of it.
 fluentbit_memory_max: 96M
 fluentbit_cpu_quota: 15%
 
-# Admin endpoint on loopback: /api/v1/health, the agent's own metrics, and
+# Admin endpoint on loopback: health, the agent's own metrics, and
 # POST /api/v2/reload, which swaps the configuration without killing the
-# process -- so a collection change keeps the on-disk buffer and opens no gap
-# in the series.
+# process -- so a collection change opens no gap in the series.
 fluentbit_http_port: 2020
 
-# Appended, never replaced. Ansible replaces same-named lists between groups,
-# and the loss would be silent, so the role concatenates base + extra instead.
+# Appended to the base lists below, never replacing them: Ansible replaces
+# same-named lists between groups and the loss would be silent.
 fluentbit_extra_inputs: []
 fluentbit_extra_filters: []
 fluentbit_extra_outputs: []
@@ -27,29 +23,22 @@ textfile_exporters: []
 # ---------------------------------------------------------------------------
 # WHAT EVERY VM COLLECTS
 #
-# The collector list is chosen for the four questions this host has to answer:
-#
-#   uptime         `stat` provides node_boot_time_seconds; with `time`'s
-#                  node_time_seconds, uptime is the difference. `systemd`
-#                  adds per-unit state and start timestamps, which is what
-#                  service uptime -- as opposed to host uptime -- means.
-#   access rate    from the nginx access log (see role_app), not from here.
-#   nginx load     stub_status through the nginx_metrics input (role_app),
-#                  plus loadavg/cpu here for the machine underneath it.
-#   saturation     meminfo, vmstat, diskstats, filesystem, filefd.
-#
-# Everything else is left off on purpose: a collector costs series, and series
-# are what a small backend runs out of first.
+# Chosen for the questions this host has to answer: is it up, how much is it
+# serving, and how close to saturation is it. A collector costs series, and
+# series are what a small backend runs out of first.
 # ---------------------------------------------------------------------------
 fluentbit_base_inputs:
   - name: node_exporter_metrics
     tag: node_metrics
     scrape_interval: 30
+    # meminfo carries SwapTotal/SwapFree and vmstat the pswpin/pswpout and
+    # oom_kill counters -- the host side of the swap picture the cgroup
+    # exporter fills in per app.
     metrics: cpu,meminfo,diskstats,filesystem,loadavg,vmstat,stat,time,uname,netdev,filefd,systemd,textfile
     collector.textfile.path: /var/lib/node_exporter/textfile
     collector.textfile.scrape_interval: 30
-    # Only the units that matter. Without the filter, systemd contributes a
-    # handful of series per unit for every unit on the box.
+    # Without the filter, systemd contributes a handful of series per unit for
+    # every unit on the box.
     systemd_include_pattern: (dotnet-app@.+\.service|nginx\.service|fluent-bit\.service|ssh\.service)
     systemd_service_restart_metrics: true
     systemd_unit_start_time_metrics: true
@@ -63,8 +52,7 @@ fluentbit_base_inputs:
     tag: fb_metrics
     scrape_interval: 30
 
-  # Host-level errors, and the OOM killer specifically. PRIORITY<=3 keeps the
-  # volume to what someone would actually read.
+  # Host errors, and the OOM killer specifically.
   - name: systemd
     tag: host.err
     systemd_filter:
@@ -81,8 +69,8 @@ fluentbit_base_inputs:
     storage.type: filesystem
     threaded: "on"
 
-# Identity on every record, from /run/instance.env. This is what lets one
-# dashboard tell two instance-pool VMs apart when neither has a stable name.
+# Identity on every record, from /run/instance.env. This is what tells two
+# instance-pool VMs apart when neither has a stable name.
 fluentbit_base_filters:
   - name: record_modifier
     match: "*"
@@ -91,7 +79,31 @@ fluentbit_base_filters:
       - instance_name ${INSTANCE_NAME}
       - fault_domain ${FD}
       - role ${ROLE}
-      - pool ${POOL}
+      - release ${RELEASE}
+
+  # `job` was a Loki label; with native VictoriaLogs ingestion every stream
+  # field has to be a field on the record.
+  - name: modify
+    match: host.err
+    add: job host
+
+  # Was loki's remove_keys. Journald attaches a couple of dozen fields per
+  # line; these are the ones nobody has ever queried.
+  - name: record_modifier
+    match_regex: ^(host\.err|app\.log)$
+    remove_key:
+      - BOOT_ID
+      - MACHINE_ID
+      - CAP_EFFECTIVE
+      - SYSTEMD_CGROUP
+      - SYSTEMD_INVOCATION_ID
+      - SYSTEMD_SLICE
+      - SOURCE_REALTIME_TIMESTAMP
+      - SELINUX_CONTEXT
+      - AUDIT_SESSION
+      - AUDIT_LOGINUID
+      - STREAM_ID
+      - SYSLOG_FACILITY
 
 fluentbit_base_outputs:
   - name: prometheus_remote_write
@@ -103,24 +115,21 @@ fluentbit_base_outputs:
       - instance ${INSTANCE_ID}
       - fault_domain ${FD}
       - job oci-${ROLE}
-      # Written into the instance configuration's metadata by `image release`
-      # and read out of /run/instance.env. This is the label the canary gate
-      # compares on -- without it canary and stable are indistinguishable in
-      # the series and the ramp has nothing to decide against.
-      - pool ${POOL}
     retry_limit: 5
-    # Buffered on disk, so a monitoring outage costs a gap in the graph rather
+    # Buffered on disk: a monitoring outage costs a gap in the graph rather
     # than the agent's memory limit.
     storage.total_limit_size: 256M
 
-  - name: loki
+  # VictoriaLogs, native ingestion. `format: json_lines` plus
+  # `json_date_format: iso8601` is what makes Fluent Bit's own `date` key the
+  # one _time_field points at.
+  - name: http
     match: host.err
     host: "{{ monitoring_endpoints.logs.host }}"
     port: "{{ monitoring_endpoints.logs.port }}"
-    uri: "{{ monitoring_endpoints.logs.uri }}"
-    labels: job=host,instance=${INSTANCE_NAME},fd=${FD},pool=${POOL}
-    label_keys: $unit
-    line_format: json
-    remove_keys: BOOT_ID,MACHINE_ID,CAP_EFFECTIVE,SYSTEMD_CGROUP,SYSTEMD_INVOCATION_ID,SOURCE_REALTIME_TIMESTAMP,SELINUX_CONTEXT,AUDIT_SESSION,AUDIT_LOGINUID,STREAM_ID,SYSLOG_FACILITY
+    uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,unit"
+    format: json_lines
+    json_date_format: iso8601
+    compress: gzip
     retry_limit: 5
     storage.total_limit_size: 256M

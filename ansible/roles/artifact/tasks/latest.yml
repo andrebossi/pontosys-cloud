@@ -1,0 +1,42 @@
+---
+# Newest version of each name in artifact_names, into artifact_versions.
+- name: Newest in the bucket
+  ansible.builtin.command: "/usr/local/bin/pscloud latest {{ item }}"
+  loop: "{{ artifact_names }}"
+  delegate_to: "{{ app_release_host }}"
+  register: bucket_latest
+  changed_when: false
+  when: artifact_store == 'bucket'
+
+- name: Newest in {{ local_artifact_dir }}
+  ansible.builtin.shell:
+    cmd: |
+      for n in {{ artifact_names | join(' ') }}; do
+        f=$(ls -1t "{{ local_artifact_dir }}/$n/$n-"*.tar.gz 2>/dev/null | head -1)
+        [ -n "$f" ] || continue
+        v=$(basename "$f" .tar.gz)
+        printf '%s %s\n' "$n" "${v#"$n"-}"
+      done
+    executable: /bin/bash
+  delegate_to: localhost
+  become: false
+  changed_when: false
+  register: local_latest
+  when: artifact_store == 'local'
+
+- name: Versions
+  ansible.builtin.set_fact:
+    artifact_versions: >-
+      {{ dict(artifact_names | zip(bucket_latest.results | map(attribute='stdout') | map('trim')))
+         if artifact_store == 'bucket'
+         else dict(local_latest.stdout_lines | map('split', ' ')) }}
+
+- name: Every one of them exists
+  ansible.builtin.assert:
+    that: artifact_names | difference(artifact_versions.keys() | list) | length == 0
+    fail_msg: >-
+      No artifact for:
+      {{ artifact_names | difference(artifact_versions.keys() | list) | join(', ') }}.
+      Publish with `pscloud push <name> <version> <file>`, or drop it in
+      {{ local_artifact_dir }}/<name>/ when artifact_store=local.
+    quiet: true

@@ -1,16 +1,10 @@
 ---
-# ===========================================================================
-# PROD — the immutable environment
+# PROD — the immutable environment. An autoscaling instance pool: a machine can
+# appear at any moment and must boot complete, which is why it is served by a
+# baked image.
 #
-# An instance pool with autoscaling: a machine can appear at any moment and
-# must come up complete, which is why prod is served by a baked image.
-#
-# Deploys here install exactly what the manifest pins. `latest` is deliberately
-# not an option: prod runs what RC validated. A version reaches this manifest
-# by being promoted, never by being resolved.
-#
-# app_manifest_write is off for the same reason -- prod records nothing of its
-# own, it only follows what promotion set.
-# ===========================================================================
+# Deploys install exactly what the manifest pins. `latest` is deliberately not
+# an option: a version reaches prod by being promoted, never by being resolved.
+app_env: prod
 app_version_source: manifest
 app_manifest_write: false

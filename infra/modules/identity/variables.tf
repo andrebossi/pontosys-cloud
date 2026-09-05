@@ -13,7 +13,7 @@ variable "roles" {
       capabilities = ["read_secrets"]
     }
     monitoring = {
-      capabilities = ["read_secrets", "read_inventory", "read_metrics", "artifacts_bucket"]
+      capabilities = ["manage_secrets", "read_inventory", "read_metrics", "artifacts_bucket"]
     }
   }
 }

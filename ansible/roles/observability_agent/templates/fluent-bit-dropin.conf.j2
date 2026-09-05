@@ -1,0 +1,41 @@
+# {{ ansible_managed }}
+#
+# Layered on the unit the fluent-bit package ships. Only what this fleet needs
+# is set here; everything else stays whatever the package decided.
+[Unit]
+After=network-online.target oci-instance-label.service
+Wants=network-online.target
+# /run/instance.env is where INSTANCE_NAME, FD and ROLE come from -- the
+# labels on every metric and log line. Without it the agent would start and
+# ship unlabelled data, which is worse than not starting.
+Requires=oci-instance-label.service
+
+[Service]
+User=fluent-bit
+Group=systemd-journal
+# adm: /var/log/nginx/*.log is 0640 root:adm. Without it the tail inputs fail
+# with permission denied and the access-rate metrics are simply absent.
+SupplementaryGroups=adm
+
+# Written by oci-instance-label.service, which runs as root before this unit.
+EnvironmentFile=/run/instance.env
+
+# The packaged unit points at fluent-bit.conf in the classic format. Reset
+# first: systemd appends ExecStart= lines otherwise and refuses to start.
+ExecStart=
+ExecStart=/opt/fluent-bit/bin/fluent-bit -c {{ fluentbit_config_dir }}/fluent-bit.yaml
+
+Restart=always
+RestartSec=5
+
+# Capped so a monitoring outage -- when the buffers fill -- cannot push the
+# applications into reclaim.
+MemoryMax={{ fluentbit_memory_max }}
+MemorySwapMax=0
+CPUQuota={{ fluentbit_cpu_quota }}
+
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths={{ fluentbit_state_dir }} {{ fluentbit_textfile_dir }}
