@@ -48,7 +48,7 @@ variable "memory_in_gbs" {
 }
 
 variable "app_image_id" {
-  description = "Imagem dourada do Packer. Vazio cai na imagem base do Ubuntu, util so no primeiro apply."
+  description = "Golden Packer image. It is based on the Ubuntu base image; useful only for the initial application."
   type        = string
   default     = ""
 }
@@ -67,6 +67,7 @@ variable "app_subnet_id" { type = string }
 variable "lb_subnet_id" { type = string }
 variable "app_nsg_ids" { type = list(string) }
 variable "lb_nsg_ids" { type = list(string) }
+variable "is_private" { type = bool }
 
 variable "ssh_public_key" { type = string }
 
@@ -114,7 +115,7 @@ variable "lb_certificate" {
 }
 
 variable "drain_timeout_seconds" {
-  description = "Janela de drenagem antes de terminar instancia removida do pool, usada na promocao do canario."
+  description = "Drainage window before terminating an instance removed from the pool, used during canary promotion."
   type        = number
   default     = 120
 }
@@ -130,7 +131,20 @@ variable "freeform_tags" {
 }
 
 variable "tag_namespace" {
-  description = "Namespace das tags definidas. Usado pelo cloud-init para descobrir o papel da instancia."
+  description = "Namespace for defined tags. Used by cloud-init to discover the instance's role."
   type        = string
   default     = "pscloud"
+}
+
+variable "autoscaling" {
+  description = "Scales the stable pool on CPU. Null disables it and the pool stays at pool_min_size."
+  type = object({
+    is_enabled           = optional(bool, true)
+    cool_down_in_seconds = optional(number, 300)
+    step                 = optional(number, 1)
+    scale_out_cpu        = optional(number, 70)
+    scale_in_cpu         = optional(number, 25)
+    pending_duration     = optional(string, "PT5M")
+  })
+  default = null
 }

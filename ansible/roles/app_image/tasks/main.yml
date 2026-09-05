@@ -1,5 +1,4 @@
 ---
-# O venv é o mesmo do app_canary: os dois drivers usam o mesmo SDK.
 - name: Python venv e pip
   ansible.builtin.apt:
     name: [python3-venv, python3-pip]

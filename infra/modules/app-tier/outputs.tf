@@ -8,7 +8,7 @@ output "instance_pool_ids" {
 }
 
 output "canary_context" {
-  description = "Consumido pelo role app_canary via terragrunt output."
+  description = "Consumed by the app_canary role through terragrunt output."
   value = {
     load_balancer_id = oci_load_balancer_load_balancer.this.id
     backend_set_name = oci_load_balancer_backend_set.app.name
@@ -20,4 +20,8 @@ output "canary_context" {
     compartment_id   = var.compartment_id
     subnet_id        = var.app_subnet_id
   }
+}
+
+output "autoscaling_configuration_id" {
+  value = one(oci_autoscaling_auto_scaling_configuration.app[*].id)
 }

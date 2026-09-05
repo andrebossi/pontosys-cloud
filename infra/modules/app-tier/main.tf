@@ -48,7 +48,7 @@ resource "oci_load_balancer_load_balancer" "this" {
   shape                      = "flexible"
   subnet_ids                 = [var.lb_subnet_id]
   network_security_group_ids = var.lb_nsg_ids
-  is_private                 = false
+  is_private                 = var.is_private
   freeform_tags              = merge(var.freeform_tags, { pscloud_component = "app-lb" })
 
   shape_details {
@@ -57,9 +57,6 @@ resource "oci_load_balancer_load_balancer" "this" {
   }
 }
 
-# Backend set unico. Os dois pools registram aqui, e a rampa do canario e feita
-# mudando o weight de cada backend -- o LB da OCI nao tem split percentual
-# entre backend sets.
 resource "oci_load_balancer_backend_set" "app" {
   load_balancer_id = oci_load_balancer_load_balancer.this.id
   name             = "${var.label_prefix}-bes-app"
@@ -121,8 +118,6 @@ resource "oci_load_balancer_listener" "https" {
   }
 }
 
-# Configuracao base. O deploy canario cria novas instance configurations pela
-# CLI e repontua os pools; por isso image_id fica fora do ciclo do Terraform.
 resource "oci_core_instance_configuration" "baseline" {
   compartment_id = var.compartment_id
   display_name   = "${var.label_prefix}-ic-app-baseline"
@@ -190,8 +185,6 @@ resource "oci_core_instance_pool" "app" {
   display_name              = "${var.label_prefix}-pool-${each.key}"
   size                      = each.key == "stable" ? var.pool_min_size : 0
 
-  # O role app_canary descobre os OCIDs por estas tags, nao por terragrunt
-  # output: a VM de monitoramento nao tem credencial do bucket de state.
   freeform_tags = merge(var.freeform_tags, {
     pscloud_component = "app-pool"
     pscloud_pool      = each.key
@@ -227,9 +220,71 @@ resource "oci_core_instance_pool" "app" {
     }
   }
 
-  # size e instance_configuration_id sao do script de deploy, nao do Terraform.
-  # Sem isto o proximo apply desfaz uma rampa em andamento.
   lifecycle {
     ignore_changes = [size, instance_configuration_id]
+  }
+}
+
+resource "oci_autoscaling_auto_scaling_configuration" "app" {
+  count = var.autoscaling == null ? 0 : 1
+
+  compartment_id       = var.compartment_id
+  display_name         = "${var.label_prefix}-as-app"
+  cool_down_in_seconds = var.autoscaling.cool_down_in_seconds
+  is_enabled           = var.autoscaling.is_enabled
+  freeform_tags        = merge(var.freeform_tags, { pscloud_component = "app-autoscaling" })
+
+  auto_scaling_resources {
+    id   = oci_core_instance_pool.app["stable"].id
+    type = "instancePool"
+  }
+
+  policies {
+    display_name = "cpu"
+    policy_type  = "threshold"
+
+    capacity {
+      initial = var.pool_min_size
+      min     = var.pool_min_size
+      max     = var.pool_max_size
+    }
+
+    rules {
+      display_name = "scale-out"
+
+      action {
+        type  = "CHANGE_COUNT_BY"
+        value = var.autoscaling.step
+      }
+
+      metric {
+        metric_type      = "CPU_UTILIZATION"
+        pending_duration = var.autoscaling.pending_duration
+
+        threshold {
+          operator = "GT"
+          value    = var.autoscaling.scale_out_cpu
+        }
+      }
+    }
+
+    rules {
+      display_name = "scale-in"
+
+      action {
+        type  = "CHANGE_COUNT_BY"
+        value = -var.autoscaling.step
+      }
+
+      metric {
+        metric_type      = "CPU_UTILIZATION"
+        pending_duration = var.autoscaling.pending_duration
+
+        threshold {
+          operator = "LT"
+          value    = var.autoscaling.scale_in_cpu
+        }
+      }
+    }
   }
 }

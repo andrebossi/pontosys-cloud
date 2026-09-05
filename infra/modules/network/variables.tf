@@ -1,68 +1,87 @@
 variable "compartment_id" { type = string }
-variable "tenancy_id" { type = string }
-variable "label_prefix" { type = string }
+variable "name" { type = string }
 
-variable "vcn_cidr" {
+variable "vcn_id" {
   type    = string
-  default = "10.20.0.0/16"
+  default = null
 }
 
-variable "subnet_cidrs" {
-  type = object({
-    public      = string
-    private_app = string
-    private_db  = string
-  })
-  default = {
-    public      = "10.20.0.0/24"
-    private_app = "10.20.16.0/20"
-    private_db  = "10.20.32.0/24"
-  }
-}
-
-variable "admin_cidrs" {
-  description = "Source of administrative SSH. Never 0.0.0.0/0."
-  type        = list(string)
-}
-
-variable "monitoring_http_cidrs" {
-  description = <<-EOT
-    Who can reach nginx's 80/443 on the monitoring VM. 80 needs to stay open
-    for Let's Encrypt's HTTP-01 challenge; what protects 443 is fail2ban
-    combined with the Grafana login.
-  EOT
-  type        = list(string)
-  default     = ["0.0.0.0/0"]
-}
-
-variable "db_client_cidrs" {
-  description = "Allowlist /32 for external MySQL access through the Network Load Balancer."
-  type        = list(string)
-  default     = []
-}
-
-variable "lb_ingress_cidrs" {
+variable "vcn_cidrs" {
   type    = list(string)
-  default = ["0.0.0.0/0"]
+  default = []
 }
 
-variable "app_backend_port" {
-  type    = number
-  default = 8080
+variable "dns_label" {
+  type    = string
+  default = null
 }
 
-variable "db_port" {
-  type    = number
-  default = 3306
+variable "create_internet_gateway" {
+  type    = bool
+  default = false
 }
 
-variable "monitoring_ingest_ports" {
-  description = "8428 = VictoriaMetrics (remote write), 9428 = VictoriaLogs."
-  type        = list(number)
-  default     = [8428, 9428]
+variable "create_nat_gateway" {
+  type    = bool
+  default = false
+}
+
+variable "create_service_gateway" {
+  type    = bool
+  default = false
+}
+
+variable "create_local_peering_gateway" {
+  type    = bool
+  default = false
+}
+
+variable "internet_gateway_id" {
+  type    = string
+  default = null
+}
+
+variable "nat_gateway_id" {
+  type    = string
+  default = null
+}
+
+variable "service_gateway_id" {
+  type    = string
+  default = null
+}
+
+variable "local_peering_gateway_id" {
+  type    = string
+  default = null
+}
+
+variable "drg_id" {
+  type    = string
+  default = null
+}
+
+variable "subnets" {
+  type    = any
+  default = {}
+}
+
+variable "nsgs" {
+  type    = list(string)
+  default = []
+}
+
+variable "nsg_rules" {
+  type    = any
+  default = {}
 }
 
 variable "freeform_tags" {
+  type    = map(string)
+  default = {}
+}
+
+variable "defined_tags" {
   type    = map(string)
   default = {}
 }

@@ -18,7 +18,7 @@ variable "fault_domain" {
 }
 
 variable "shape_name" {
-  description = "Shapes OCPU (MySQL.VM.Standard.*) sairam de circulacao em 2026-03-13. Use ECPU: MySQL.Free, MySQL.2, MySQL.4, MySQL.8."
+  description = "Shapes ECPU: MySQL.Free, MySQL.2, MySQL.4, MySQL.8."
   type        = string
   default     = "MySQL.2"
 }
@@ -52,8 +52,8 @@ variable "db_subnet_id" { type = string }
 variable "nlb_subnet_id" { type = string }
 variable "nlb_nsg_ids" { type = list(string) }
 
-variable "expose_via_nlb" {
-  description = "MySQL HeatWave nao aceita IP publico. O acesso externo com allowlist /32 passa por um Network Load Balancer."
+variable "expose_nlb" {
+  description = "MySQL HeatWave does not accept public IPs. External access via a /32 allowlist goes through a Network Load Balancer."
   type        = bool
   default     = true
 }
@@ -61,6 +61,11 @@ variable "expose_via_nlb" {
 variable "db_port" {
   type    = number
   default = 3306
+}
+
+variable "db_listener_port" {
+  type    = number
+  default = 55336
 }
 
 variable "backup" {

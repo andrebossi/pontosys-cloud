@@ -7,7 +7,7 @@ locals {
     var.availability_domain,
     data.oci_identity_availability_domains.this.availability_domains[var.availability_domain_index].name,
   )
-  nlb_count = var.expose_via_nlb ? 1 : 0
+  nlb_count = var.expose_nlb ? 1 : 0
 }
 
 resource "oci_mysql_mysql_db_system" "this" {
@@ -89,6 +89,6 @@ resource "oci_network_load_balancer_listener" "mysql" {
   name                     = "mysql"
   network_load_balancer_id = oci_network_load_balancer_network_load_balancer.this[0].id
   default_backend_set_name = oci_network_load_balancer_backend_set.mysql[0].name
-  port                     = var.db_port
+  port                     = var.db_listener_port
   protocol                 = "TCP"
 }

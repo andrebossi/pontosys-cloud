@@ -1,57 +1,44 @@
-# ---------------------------------------------------------------------------
-# NAMESPACE DE TAGS DEFINIDAS
-#
-# Tag definida e nao freeform por dois motivos concretos:
-#   1. regra de dynamic group SO enxerga tag definida -- `tag.pscloud.role.value`
-#      funciona, freeform nao;
-#   2. tag definida aceita VALIDADOR de valores. Com a lista de valores
-#      permitidos, um `terraform apply` com role = "database" (em vez de "db")
-#      falha no plano. Com freeform tag ele aplicaria, a VM subiria fora de todo
-#      dynamic group, o instance principal nao leria segredo nenhum e o erro
-#      apareceria como "Ansible nao consegue autenticar no Vault".
-# ---------------------------------------------------------------------------
 resource "oci_identity_tag_namespace" "this" {
   compartment_id = var.compartment_id
   name           = var.label_prefix
-  description    = "Taxonomia de recursos do ambiente ${var.label_prefix}"
+  description    = "Resource taxonomy for the ${var.label_prefix} environment"
   is_retired     = false
 }
 
 locals {
   tag_keys = {
     role = {
-      description      = "Papel operacional. Alimenta dynamic group de IAM e o inventario do Ansible."
+      description      = "Operational role. Feeds the IAM dynamic groups and the Ansible inventory."
       values           = keys(var.roles)
       is_cost_tracking = false
     }
     tier = {
-      description      = "Camada da arquitetura."
-      values           = ["web", "data", "ops"]
+      description      = "Architecture tier."
+      values           = var.tiers
       is_cost_tracking = false
     }
     environment = {
-      description      = "Ambiente."
-      values           = ["prod", "staging", "dev"]
+      description      = "Environment."
+      values           = var.environments
       is_cost_tracking = true
     }
     data_classification = {
-      description      = "Sensibilidade do dado em repouso no recurso."
+      description      = "Sensitivity of the data at rest on the resource."
       values           = ["public", "internal", "confidential", "restricted"]
       is_cost_tracking = false
     }
     backup = {
-      description      = "Politica de backup esperada. Auditavel: recurso com backup=required e sem assignment e achado de conformidade."
+      description      = "Expected backup policy. Auditable: a resource tagged backup=required with no assignment is a compliance finding."
       values           = ["none", "bronze", "silver", "gold"]
       is_cost_tracking = false
     }
-    # Sem lista de valores: texto livre, mas rastreado em custo.
     cost_center = {
-      description      = "Centro de custo para rateio."
+      description      = "Cost center for chargeback."
       values           = null
       is_cost_tracking = true
     }
     owner = {
-      description      = "Time responsavel por acordar as 3h da manha."
+      description      = "Team that gets woken up at 3am."
       values           = null
       is_cost_tracking = false
     }
@@ -75,20 +62,12 @@ resource "oci_identity_tag" "this" {
   }
 }
 
-# ---------------------------------------------------------------------------
-# IDENTIDADE DAS INSTANCIAS (instance principals)
-#
-# A tag `role` e uma fonte de verdade para tres coisas: placement e NSG no
-# Terraform, permissao de IAM aqui, e agrupamento do inventario dinamico do
-# Ansible. Nao ha um segundo lugar onde "esta VM e o monitoramento" esteja
-# escrito.
-# ---------------------------------------------------------------------------
 resource "oci_identity_dynamic_group" "role" {
   for_each = var.roles
 
   compartment_id = var.tenancy_id
   name           = "${var.label_prefix}-dg-${each.key}"
-  description    = "Instancias com ${var.label_prefix}.role = ${each.key}"
+  description    = "Instances tagged ${var.label_prefix}.role = ${each.key}"
   matching_rule  = "ALL {instance.compartment.id = '${var.compartment_id}', tag.${var.label_prefix}.role.value = '${each.key}'}"
 
   depends_on = [oci_identity_tag.this]
@@ -98,15 +77,11 @@ locals {
   dg = { for k, v in oci_identity_dynamic_group.role : k => v.name }
   c  = var.compartment_id
 
-  # Cada capability e um conjunto de statements com proposito unico. Adicionar
-  # um papel novo e escolher capabilities, nao escrever statement solto.
   capability_statements = {
-    # Le o proprio segredo (credencial de banco, chave SSH) do Vault.
     read_secrets = [
       "to read secret-bundles in compartment id ${local.c}",
     ]
 
-    # Monta o inventario dinamico do Ansible e resolve IP das instancias.
     read_inventory = [
       "to read instance-family in compartment id ${local.c}",
       "to read virtual-network-family in compartment id ${local.c}",
@@ -119,21 +94,6 @@ locals {
     artifacts_bucket = [
       "to manage objects in compartment id ${local.c} where target.bucket.name = '${var.artifacts_bucket_name}'",
       "to read buckets in compartment id ${local.c}",
-    ]
-
-    # O que o canary.py e o image.py precisam: mover weight de backend,
-    # redimensionar pool, criar instance configuration e podar imagem.
-    deploy_executor = [
-      "to manage instance-pools in compartment id ${local.c}",
-      "to manage instance-configurations in compartment id ${local.c}",
-      "to manage load-balancers in compartment id ${local.c}",
-      "to manage instance-images in compartment id ${local.c}",
-      "to use volume-family in compartment id ${local.c}",
-      "to use virtual-network-family in compartment id ${local.c}",
-      "to read limits in tenancy",
-      # O escopo por tag e o que impede o executor de terminar a propria VM de
-      # monitoramento ou qualquer coisa fora da camada de aplicacao.
-      "to manage instance-family in compartment id ${local.c} where target.resource.tag.${var.label_prefix}.role = '${var.managed_role_tag_value}'",
     ]
   }
 
@@ -148,14 +108,12 @@ locals {
   }
 }
 
-# Uma policy por papel. `app` nao ganha nada de deploy; `monitoring` nao ganha
-# permissao que nao use.
 resource "oci_identity_policy" "role" {
   for_each = { for k, v in local.role_statements : k => v if length(v) > 0 }
 
   compartment_id = var.compartment_id
   name           = "${var.label_prefix}-policy-${each.key}"
-  description    = "Permissoes de instance principal do papel ${each.key}"
+  description    = "Instance principal permissions for the ${each.key} role"
   statements     = each.value
 
   freeform_tags = var.freeform_tags
