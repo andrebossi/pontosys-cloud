@@ -1,0 +1,47 @@
+---
+# The .deb is UNPACKED, never installed. `apt install libssl1.1` would put an
+# end-of-life TLS library on the library search path of every process on the
+# box, including sshd and the agent. Here it is reachable only through
+# LD_LIBRARY_PATH on the .NET units.
+- name: Compatibility library directory
+  ansible.builtin.file:
+    path: "{{ dotnet_compat_dir }}/lib"
+    state: directory
+    mode: "0755"
+
+- name: Download compatibility packages
+  ansible.builtin.get_url:
+    url: "{{ item.url }}"
+    dest: "/var/cache/{{ item.name }}.deb"
+    mode: "0644"
+  loop: "{{ dotnet_compat_packages }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: compat_download
+
+- name: Unpack compatibility packages
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      rm -rf {{ dotnet_compat_dir }}/.unpack/{{ item.name }} &&
+      mkdir -p {{ dotnet_compat_dir }}/.unpack/{{ item.name }} &&
+      dpkg-deb -x /var/cache/{{ item.name }}.deb {{ dotnet_compat_dir }}/.unpack/{{ item.name }} &&
+      find {{ dotnet_compat_dir }}/.unpack/{{ item.name }} -name '*.so*' -type f
+        -exec cp -a {} {{ dotnet_compat_dir }}/lib/ \;
+    executable: /bin/bash
+  loop: "{{ dotnet_compat_packages }}"
+  loop_control:
+    label: "{{ item.name }}"
+  when: compat_download is changed
+  changed_when: true
+
+# Proves the unpack produced the sonames the runtime dlopens. Without this the
+# failure surfaces months later as a TLS handshake exception in one endpoint.
+- name: Compatibility libraries are present
+  ansible.builtin.stat:
+    path: "{{ dotnet_compat_dir }}/lib/{{ item.1 }}"
+  loop: "{{ dotnet_compat_packages | subelements('provides') }}"
+  loop_control:
+    label: "{{ item.1 }}"
+  register: compat_libs
+  failed_when: not compat_libs.stat.exists

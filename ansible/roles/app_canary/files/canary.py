@@ -11,12 +11,16 @@ are expressed with `drain`, not with weight.
   canary status
   canary up [--size N]
   canary shift 25
+  canary gate --window 10m
   canary promote
   canary abort
 """
 
 import argparse
+import json
 import sys
+import urllib.parse
+import urllib.request
 
 import oci
 
@@ -163,6 +167,112 @@ class Canary:
         return f"promoted: stable pool recreated with {ic}"
 
 
+class Gate:
+    """Does the canary look worse than stable?
+
+    Reads VictoriaMetrics rather than the load balancer, because the question
+    is about what the applications ANSWERED, not about whether the backend is
+    reachable. The `pool` label comes from /run/instance.env, which the agent
+    reads at start -- the value is written into the instance configuration's
+    metadata by `image release`, so canary and stable are distinguishable in
+    the series without anything else having to know about the rollout.
+
+    This is the piece that turns `canary shift` from something a person runs
+    into something a pipeline runs.
+    """
+
+    def __init__(self, url, window):
+        self.url = url.rstrip("/")
+        self.w = window
+
+    def _query(self, expr):
+        u = f"{self.url}/api/v1/query?" + urllib.parse.urlencode({"query": expr})
+        with urllib.request.urlopen(u, timeout=15) as r:
+            body = json.load(r)
+        if body.get("status") != "success":
+            raise RuntimeError(f"query failed: {body}")
+        res = body["data"]["result"]
+        if not res:
+            return None
+        return float(res[0]["value"][1])
+
+    def requests(self, pool):
+        return self._query(
+            f'sum(increase(nginx_requests{{pool="{pool}"}}[{self.w}]))'
+        ) or 0.0
+
+    def error_rate(self, pool):
+        """5xx as a share of all answers. None when the pool served nothing."""
+        total = self._query(f'sum(rate(nginx_requests{{pool="{pool}"}}[{self.w}]))')
+        if not total:
+            return None
+        bad = self._query(
+            f'sum(rate(nginx_requests{{pool="{pool}",status=~"5.."}}[{self.w}]))'
+        ) or 0.0
+        return bad / total
+
+    def latency_p95(self, pool):
+        """None when the histogram has no samples for this pool yet."""
+        return self._query(
+            "histogram_quantile(0.95, sum(rate("
+            f'nginx_request_duration_seconds_bucket{{pool="{pool}"}}[{self.w}]'
+            ")) by (le))"
+        )
+
+    def evaluate(self, min_requests, max_error_rate, max_error_delta, max_latency_ratio):
+        c_req = self.requests("canary")
+        c_err = self.error_rate("canary")
+        s_err = self.error_rate("stable")
+        c_p95 = self.latency_p95("canary")
+        s_p95 = self.latency_p95("stable")
+
+        report = {
+            "window": self.w,
+            "canary_requests": c_req,
+            "canary_error_rate": c_err,
+            "stable_error_rate": s_err,
+            "canary_p95": c_p95,
+            "stable_p95": s_p95,
+        }
+        fail = []
+
+        # Too little traffic is NOT a pass. A canary that served nine requests
+        # proves nothing, and treating "no errors seen" as success is how a
+        # broken release gets promoted at 3am.
+        if c_req < min_requests:
+            fail.append(
+                f"only {c_req:.0f} requests in {self.w}, need {min_requests} "
+                "to say anything -- ramp further or wait"
+            )
+
+        if c_err is None:
+            if c_req >= min_requests:
+                fail.append("canary served requests but has no error-rate series")
+        else:
+            if c_err > max_error_rate:
+                fail.append(f"canary 5xx {c_err:.2%} over the {max_error_rate:.2%} ceiling")
+            # Compared against stable as well as against the ceiling: a release
+            # is only bad if it is worse than what it replaces. A 4% baseline
+            # on both sides is a pre-existing problem, not a regression.
+            if s_err is not None and c_err > s_err + max_error_delta:
+                fail.append(
+                    f"canary 5xx {c_err:.2%} vs stable {s_err:.2%}, "
+                    f"worse by more than {max_error_delta:.2%}"
+                )
+
+        if c_p95 and s_p95 and s_p95 > 0:
+            ratio = c_p95 / s_p95
+            report["p95_ratio"] = ratio
+            if ratio > max_latency_ratio:
+                fail.append(
+                    f"canary p95 {c_p95:.3f}s is {ratio:.2f}x stable "
+                    f"{s_p95:.3f}s, over {max_latency_ratio:.2f}x"
+                )
+
+        report["failures"] = fail
+        return report
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--compartment-id", required=True)
@@ -172,9 +282,43 @@ def main():
     sub.add_parser("status")
     up = sub.add_parser("up"); up.add_argument("--size", type=int, default=1)
     sh = sub.add_parser("shift"); sh.add_argument("percent", type=float, help="0 to 100")
+    g = sub.add_parser("gate", help="compare canary against stable and exit non-zero if worse")
+    g.add_argument("--metrics-url", default="http://127.0.0.1:8428")
+    g.add_argument("--window", default="10m")
+    g.add_argument("--min-requests", type=float, default=200)
+    g.add_argument("--max-error-rate", type=float, default=0.02)
+    g.add_argument("--max-error-delta", type=float, default=0.01)
+    g.add_argument("--max-latency-ratio", type=float, default=1.5)
     sub.add_parser("promote")
     sub.add_parser("abort")
     a = p.parse_args()
+
+    # The gate reads metrics only -- it never touches the load balancer, so it
+    # does not need the compartment or a pool to exist.
+    if a.cmd == "gate":
+        r = Gate(a.metrics_url, a.window).evaluate(
+            a.min_requests, a.max_error_rate, a.max_error_delta, a.max_latency_ratio
+        )
+
+        def pct(v):
+            return "n/a" if v is None else f"{v:.2%}"
+
+        def sec(v):
+            return "n/a" if v is None else f"{v:.3f}s"
+
+        print(f"window          : {r['window']}")
+        print(f"canary requests : {r['canary_requests']:.0f}")
+        print(f"5xx  canary     : {pct(r['canary_error_rate'])}")
+        print(f"5xx  stable     : {pct(r['stable_error_rate'])}")
+        print(f"p95  canary     : {sec(r['canary_p95'])}")
+        print(f"p95  stable     : {sec(r['stable_p95'])}")
+        if r["failures"]:
+            print("\nGATE FAILED")
+            for f in r["failures"]:
+                print(f"  - {f}")
+            sys.exit(1)
+        print("\ngate passed")
+        return
 
     c = Canary(a.compartment_id, a.port, a.profile)
 

@@ -34,3 +34,9 @@ output "bastion_id" {
 output "namespace" { value = data.oci_objectstorage_namespace.this.namespace }
 output "bucket_name" { value = oci_objectstorage_bucket.backups.name }
 output "bucket_id" { value = oci_objectstorage_bucket.backups.bucket_id }
+
+output "app_db_passwords" {
+  description = "Password per application, consumed by the database module to create the MySQL users."
+  value       = { for key, password in random_password.app_db : key => password.result }
+  sensitive   = true
+}

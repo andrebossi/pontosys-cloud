@@ -1,0 +1,82 @@
+---
+# Non-secret configuration. .NET reads appsettings.json out of the artifact
+# first and then overlays appsettings.<Environment>.json, so this file changes
+# behaviour without the artifact having to be rebuilt. It lives in shared/ and
+# is symlinked into each release by the deploy.
+- name: Application settings
+  ansible.builtin.template:
+    src: appsettings.json.j2
+    dest: "{{ app_deploy_root }}/{{ item.key }}/shared/appsettings.Production.json"
+    owner: root
+    group: "{{ app_deploy_user }}"
+    mode: "0640"
+    validate: "python3 -c \"import json,sys; json.load(open(sys.argv[1]))\" %s"
+  loop: "{{ applications | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: app_settings_written
+
+# The only place on the machine where a password appears: 0640 root:dotnetapp.
+# It is not in the artifact, not in the image, not in git, and does not show
+# up in `systemctl show` -- environment files are read by PID 1, not exported
+# into the unit's visible properties.
+#
+# Environment configuration outranks every JSON file in .NET, so anything here
+# wins over appsettings.
+- name: Secret environment file
+  ansible.builtin.template:
+    src: app.env.j2
+    dest: "{{ app_config_dir }}/{{ item.key }}.env"
+    owner: root
+    group: "{{ app_deploy_user }}"
+    mode: "0640"
+  loop: "{{ applications | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  no_log: true
+  register: app_env_written
+
+- name: Applications are enabled
+  ansible.builtin.systemd:
+    name: "dotnet-app@{{ item.key }}.service"
+    enabled: true
+    daemon_reload: true
+  loop: "{{ applications | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+# An application with no `current` symlink has never been deployed. Its unit
+# fails AssertPathExists on purpose, so it is left alone here rather than
+# turning a pending deploy into a failed play.
+- name: Which applications have an artifact
+  ansible.builtin.stat:
+    path: "{{ app_deploy_root }}/{{ item.key }}/current"
+  loop: "{{ applications | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: app_current
+
+- name: Deployed applications, and which of them changed
+  ansible.builtin.set_fact:
+    apps_deployed: >-
+      {{ app_current.results | selectattr('stat.exists')
+         | map(attribute='item.key') | list }}
+    apps_changed: >-
+      {{ (app_settings_written.results + app_env_written.results
+          + app_runtime_dropin.results + app_limits_dropin.results)
+         | selectattr('changed')
+         | map(attribute='item.key') | unique | list }}
+
+- name: Deployed applications are running
+  ansible.builtin.systemd:
+    name: "dotnet-app@{{ item }}.service"
+    state: started
+  loop: "{{ apps_deployed }}"
+
+# Restart only what changed. A handler would restart all of them, and an
+# env-file edit on the reports API must not bounce the payment API.
+- name: Restart the applications whose configuration changed
+  ansible.builtin.systemd:
+    name: "dotnet-app@{{ item }}.service"
+    state: restarted
+  loop: "{{ apps_changed | intersect(apps_deployed) }}"

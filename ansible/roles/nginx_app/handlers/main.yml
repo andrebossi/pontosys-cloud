@@ -1,0 +1,7 @@
+---
+# reload, not restart: a reload starts new workers with the new configuration
+# and lets the old ones finish their in-flight requests. A restart drops them.
+- name: reload nginx
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded

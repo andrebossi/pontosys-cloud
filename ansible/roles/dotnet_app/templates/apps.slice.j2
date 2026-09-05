@@ -1,14 +1,16 @@
 # {{ ansible_managed }}
 [Unit]
-Description=.NET applications slice
+Description=.NET applications
 Before=slices.target
 
-# Ceiling for the WHOLE GROUP. The per-app limit stops any single one from
-# exploding; this one stops all 9, each within their own limit, from adding
-# up to more than the VM has.
-# It also gives the collection its identity: Fluent Bit's systemd input
-# filters on _SYSTEMD_SLICE=apps.slice and the cgroup exporter scans
-# /sys/fs/cgroup/apps.slice/dotnet-app@*.service.
+# The ceiling for the GROUP. Each app has its own limit; this is what stops
+# {{ applications | length }} of them, each inside its own limit, from adding up to more than
+# the {{ (host_memory_mb / 1024) | round(1) }} GB this VM has.
+#
+# It is also the collection's identity: Fluent Bit's systemd input filters on
+# _SYSTEMD_SLICE=apps.slice, and the cgroup exporter walks
+# /sys/fs/cgroup/apps.slice/dotnet-app@*.service. An app started outside this
+# slice runs, but is invisible.
 
 [Slice]
 MemoryAccounting=yes

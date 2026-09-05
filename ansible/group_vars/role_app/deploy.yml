@@ -1,0 +1,51 @@
+---
+# ===========================================================================
+# ARTIFACT DELIVERY
+#
+# CI runs `dotnet publish -c Release`, tars the publish directory, attaches it
+# to a GitHub Release, and mirrors it into the OCI bucket:
+#
+#   release push pixapi 1.4.0 ./pixapi.tar.gz
+#
+# Machines then pull from the bucket (see artifact_bucket in all.yml). The
+# GitHub settings below are the fallback path, for a hotfix or a scratch VM
+# where going through CI is not worth it.
+#
+# On-disk layout (Capistrano-shaped, and for the same reasons):
+#
+#   /srv/apps/<app>/releases/<tag>/     unpacked artifact, never written to
+#   /srv/apps/<app>/shared/             state that outlives a release
+#   /srv/apps/<app>/current -> releases/<tag>
+#
+# The switch is a symlink rename, so a rollback is `deploy.yml -e version=<old>`
+# and takes as long as a restart. Releases are kept, so the old tree is still
+# on disk.
+# ===========================================================================
+
+app_deploy_root: /srv/apps
+app_deploy_user: dotnetapp
+
+# Fallback source only -- app_artifact_source: github.
+app_artifact:
+  owner: pontosys
+  # One repository holding every app's releases. An app can override with
+  # `artifact: {repo: other-repo}` in its catalog entry.
+  repo: pscloud-apps
+  # Default asset name; an app overrides it with `asset:` in the catalog.
+  asset_suffix: ".tar.gz"
+  api: https://api.github.com
+
+# Read from the environment so the token never lands in git or in a fact.
+# Generate a fine-grained PAT with `Contents: read` on that repository only.
+app_artifact_token: "{{ lookup('env', 'GITHUB_TOKEN') }}"
+
+# Old releases kept on disk for rollback. Four .NET publish trees average
+# ~60 MB each; five of them is the sensible ceiling for a small boot volume.
+app_releases_keep: 5
+
+# After the symlink switch, the app must answer on its own port before the
+# deploy is called successful. If it does not, the play fails with the unit's
+# journal attached instead of leaving a dead app behind a healthy nginx.
+app_deploy_health_path: /
+app_deploy_health_retries: 12
+app_deploy_health_delay: 5

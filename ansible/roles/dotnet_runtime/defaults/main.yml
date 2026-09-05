@@ -1,10 +1,23 @@
 ---
-dotnet_channel: "5.0"
-dotnet_version: "5.0.17"
-dotnet_install_dir: /usr/share/dotnet
+dotnet_root: /opt/dotnet
+dotnet_compat_dir: /opt/dotnet/compat
+dotnet_runtimes: {}
+dotnet_compat_packages: []
+dotnet_drawing_packages: []
+dotnet_fonts: []
+dotnet_fonts_dir: /usr/local/share/fonts/msttcore
 
-# .NET 5 predates OpenSSL 3. On Ubuntu 22.04/24.04 libssl1.1 doesn't exist
-# in the repository and has to come from focal — without it any TLS path
-# (HttpClient https, certificates, some hash routines) fails at runtime.
-dotnet_needs_libssl11: true
-dotnet_libssl11_url: http://security.ubuntu.com/ubuntu/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_amd64.deb
+# Where the tarballs come from. dotnetcli.azureedge.net was retired in 2024;
+# this is the current CDN and it still serves out-of-support versions.
+dotnet_download_base: https://builds.dotnet.microsoft.com/dotnet
+
+# Install the ASP.NET Core runtime, not the base one: it carries both shared
+# frameworks (Microsoft.NETCore.App and Microsoft.AspNetCore.App) plus the
+# host, which is exactly what a framework-dependent web app needs and nothing
+# more. The SDK is deliberately absent -- nothing compiles on this box.
+dotnet_package: aspnetcore-runtime
+
+# Any app on the host needs System.Drawing support. Computed by the role from
+# the catalog, but overridable for the golden image, which bakes it in
+# unconditionally.
+dotnet_install_drawing: "{{ applications | default({}) | dict2items | selectattr('value.drawing', 'defined') | selectattr('value.drawing') | list | length > 0 }}"

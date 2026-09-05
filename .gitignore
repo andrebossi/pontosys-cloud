@@ -53,3 +53,7 @@ terragrunt-debug.tfvars.json
 keys/*
 !infra/bootstrap/*.tfvars
 !infra/bootstrap/*.tfstate
+### Ansible secrets ###
+ansible/group_vars/**/vault.yml
+ansible/host_vars/**/vault.yml
+ansible/files

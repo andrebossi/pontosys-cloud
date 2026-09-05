@@ -48,8 +48,17 @@
     argv: >-
       {{ ['/usr/local/bin/canary', canary_action]
          + ([canary_percent | string] if canary_action == 'shift' else [])
-         + (['--size', canary_size | string] if canary_action == 'up' else []) }}
+         + (['--size', canary_size | string] if canary_action == 'up' else [])
+         + (['--metrics-url', canary_metrics_url,
+             '--window', canary_gate_window,
+             '--min-requests', canary_gate_min_requests | string,
+             '--max-error-rate', canary_gate_max_error_rate | string,
+             '--max-error-delta', canary_gate_max_error_delta | string,
+             '--max-latency-ratio', canary_gate_max_latency_ratio | string]
+            if canary_action == 'gate' else []) }}
   register: canary_run
+  # The gate is a read. It fails the play when the canary looks worse, which
+  # is the point -- a pipeline step that stops the ramp.
   changed_when: canary_action in ['up', 'shift', 'promote', 'abort']
 
 - name: Result

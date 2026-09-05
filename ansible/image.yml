@@ -1,33 +1,79 @@
 ---
-# Imagem dourada da camada de aplicação. Executado pelo Packer dentro da
-# instância temporária -- não contra a frota.
+# Golden image for the application layer. Run by Packer inside a temporary
+# instance, not against the fleet.
 #
-# O que sai daqui é uma imagem sem segredo e sem estado de máquina. Quem a
-# coloca em uso é o driver `image release` (roles/app_image), que roda na VM de
-# monitoramento com a identidade dela.
-- name: Golden image for the application layer
+# Run Packer FROM THE MONITORING VM. That machine is already the Ansible
+# executor, and its instance principal is what mints the download URLs for the
+# artifacts -- from anywhere else you need `--profile` and an API key. It is
+# also why app_release_host is localhost here: there is no monitoring host in
+# Packer's inventory, and localhost is that machine.
+#
+# The image is a function of (this repository at a commit) + (the environment's
+# manifest). It is never a snapshot of a machine that has served traffic: that
+# would capture accumulated release directories, agent buffers and whatever
+# was fixed by hand at 2am, and the thing promoted to production would be a
+# photograph of what was tested rather than the thing itself.
+- name: Application golden image
   hosts: default
   become: true
+
+  vars:
+    # Which environment's manifest gets baked. prod, because that is what an
+    # instance pool boots from; rc is served in place by deploy.yml.
+    image_manifest_env: prod
+    image_bake_apps: true
+
+    app_bake: true
+    app_env: "{{ image_manifest_env }}"
+    app_version_source: manifest
+    app_manifest_write: false
+    # No monitoring host in Packer's inventory -- localhost is the machine
+    # running the build, which is where the OCI credentials are.
+    app_release_host: localhost
+
   roles:
     - base
-    - dotnet_runtime
-    - nginx_app
+    - role: dotnet_runtime
+      vars:
+        # The catalog is not consulted: the image is shared by the whole fleet
+        # and carries libgdiplus and the fonts regardless of which apps happen
+        # to need them today.
+        dotnet_install_drawing: true
+    - role: nginx_app
+      vars:
+        # ~140 MB of SPA bundles do not belong in a machine image; site.yml
+        # syncs them.
+        nginx_deploy_static: false
     - observability_agent
 
   post_tasks:
-    # Only units and directories. Tasks that read secrets from Vault are
-    # deliberately left out: the image is shared across the whole fleet.
-    - name: Units and limits per application
+    # Units, slice and directories only. dotnet_app's config.yml reads secrets
+    # and is deliberately left out -- an image is shared by the whole fleet.
+    - name: Units and limits
       ansible.builtin.include_role:
         name: dotnet_app
         tasks_from: units.yml
 
-    - name: Clean up state before turning into an image
+    # The applications, at the versions the manifest pins. Same role, same
+    # tarballs, same symlink switch as a live deploy: rc and the image share
+    # one delivery path, so the only untested difference between them is a
+    # fresh unpack versus an unpack over an existing tree.
+    - name: Applications from the {{ image_manifest_env }} manifest
+      ansible.builtin.include_role:
+        name: app_deploy
+      when: image_bake_apps | bool
+
+    - name: Strip machine state before capture
       ansible.builtin.shell:
         cmd: |
           rm -rf /var/lib/fluent-bit/*.db /var/lib/fluent-bit/storage/*
-          rm -f /etc/machine-id && touch /etc/machine-id
+          # A cloned machine-id makes every VM in the pool report the same
+          # journal identity. Truncated, not deleted: systemd regenerates it
+          # on first boot only if the file exists and is empty.
+          truncate -s 0 /etc/machine-id
           cloud-init clean --logs || true
           truncate -s 0 /var/log/*.log || true
+          rm -f /var/cache/*.deb /var/cache/*.tar.gz
+          rm -f /run/instance.env
         executable: /bin/bash
       changed_when: true

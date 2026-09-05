@@ -1,0 +1,39 @@
+---
+# System.Drawing.Common on Linux is a thin wrapper over libgdiplus, which is
+# not a managed dependency: it is absent until installed, and its absence only
+# shows up when a report is rendered.
+- name: libgdiplus and its dependencies
+  ansible.builtin.apt:
+    name: "{{ dotnet_drawing_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Fonts directory
+  ansible.builtin.file:
+    path: "{{ dotnet_fonts_dir }}"
+    state: directory
+    mode: "0755"
+
+# Report layouts reference Arial, Tahoma and Orator by name. Without them
+# libgdiplus substitutes a default face, the metrics change, and invoices come
+# out with shifted columns -- a silent corruption, not an error.
+- name: Microsoft fonts
+  ansible.builtin.copy:
+    src: "fontes/{{ item }}"
+    dest: "{{ dotnet_fonts_dir }}/{{ item }}"
+    mode: "0644"
+  loop: "{{ dotnet_fonts }}"
+  register: fonts_copied
+
+- name: Rebuild the font cache
+  ansible.builtin.command: fc-cache -f "{{ dotnet_fonts_dir }}"
+  when: fonts_copied is changed
+  changed_when: true
+
+- name: Fonts are resolvable by name
+  ansible.builtin.command: "fc-match {{ item }}"
+  loop: [Arial, Tahoma]
+  register: fc_match
+  changed_when: false
+  failed_when: item | lower not in fc_match.stdout | lower

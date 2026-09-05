@@ -1,0 +1,50 @@
+---
+# Direct from a private repository, for a hotfix or a scratch VM when going
+# through CI is not worth it. The normal path is the bucket.
+#
+# Two calls, not one: `browser_download_url` from the release response needs a
+# browser session and returns 404 on a private repository. The asset endpoint
+# with Accept: application/octet-stream is what a token can read.
+- name: "{{ app_name }} — a token is available"
+  ansible.builtin.assert:
+    that: app_artifact_token | length > 0
+    fail_msg: >-
+      app_artifact_source is github but GITHUB_TOKEN is unset. Export a
+      fine-grained PAT with `Contents: read` on
+      {{ gh_owner }}/{{ gh_repo }}.
+    quiet: true
+
+- name: "{{ app_name }} — release metadata"
+  ansible.builtin.uri:
+    url: "{{ app_artifact.api }}/repos/{{ gh_owner }}/{{ gh_repo }}/releases/tags/{{ app_ver }}"
+    headers:
+      Authorization: "Bearer {{ app_artifact_token }}"
+      Accept: application/vnd.github+json
+      X-GitHub-Api-Version: "2022-11-28"
+  delegate_to: localhost
+  become: false
+  register: gh_release
+  no_log: true
+
+- name: "{{ app_name }} — the release carries {{ gh_asset }}"
+  ansible.builtin.set_fact:
+    gh_assets: "{{ gh_release.json.assets | selectattr('name', 'equalto', gh_asset) | list }}"
+
+- name: "{{ app_name }} — it really does"
+  ansible.builtin.assert:
+    that: gh_assets | length == 1
+    fail_msg: >-
+      Release {{ app_ver }} of {{ gh_owner }}/{{ gh_repo }} has no asset named
+      {{ gh_asset }}. Present:
+      {{ gh_release.json.assets | map(attribute='name') | join(', ') }}
+    quiet: true
+
+- name: "{{ app_name }} — fetch {{ app_ver }}"
+  ansible.builtin.get_url:
+    url: "{{ app_artifact.api }}/repos/{{ gh_owner }}/{{ gh_repo }}/releases/assets/{{ (gh_assets | first).id }}"
+    headers:
+      Authorization: "Bearer {{ app_artifact_token }}"
+      Accept: application/octet-stream
+    dest: "{{ artifact_local }}"
+    mode: "0640"
+  no_log: true

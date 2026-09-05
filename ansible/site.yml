@@ -1,20 +1,37 @@
 ---
-- name: Common base
+# Full convergence. Idempotent: safe to run against a live fleet.
+#
+#   ansible-playbook site.yml                      everything
+#   ansible-playbook site.yml --check --diff       dry run
+#   ansible-playbook site.yml --tags nginx         one layer
+#   ansible-playbook site.yml --limit 10.20.16.5   one machine
+
+- name: Host baseline
   hosts: all
   become: true
   roles:
-    - base
-    - observability_agent
+    - role: base
+      tags: [base]
+    - role: observability_agent
+      tags: [observability]
 
-- name: Applications
+- name: Application layer
   hosts: role_app
   become: true
+  # One VM at a time. The instance pool sits behind a load balancer, and a
+  # simultaneous nginx reload on every backend is a visible outage.
+  serial: 1
   roles:
-    - nginx_app
-    - dotnet_app
+    - role: dotnet_runtime
+      tags: [dotnet, runtime]
+    - role: nginx_app
+      tags: [nginx]
+    - role: dotnet_app
+      tags: [dotnet, apps]
 
-- name: Observability stack
+- name: Observability backend
   hosts: role_monitoring
   become: true
   roles:
-    - monitoring_stack
+    - role: monitoring_stack
+      tags: [monitoring]

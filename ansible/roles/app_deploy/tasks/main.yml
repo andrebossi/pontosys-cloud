@@ -1,0 +1,14 @@
+---
+# Normally resolved once by the "Resolve" play in deploy.yml. Re-resolved here
+# only when the role is used on its own -- during a Packer build, for example,
+# where there is a single builder and no serial rollout to keep consistent.
+- name: Resolve versions
+  ansible.builtin.include_tasks: resolve.yml
+  when: app_versions is not defined
+
+- name: Deploy
+  ansible.builtin.include_tasks: release.yml
+  loop: "{{ deploy_apps }}"
+  loop_control:
+    loop_var: app_name
+    label: "{{ app_name }} {{ app_versions[app_name] | default('?') }}"

@@ -21,10 +21,11 @@ variable "applications" {
     Adding an application = adding a key to this map. Nothing else changes.
   EOT
   type = map(object({
-    db_name = string
-    db_user = string
-    db_host = optional(string, "%")
-    grants  = optional(list(string), ["SELECT", "INSERT", "UPDATE", "DELETE"])
+    db_name   = string
+    db_user   = string
+    db_host   = optional(string, "%")
+    grants    = optional(list(string), ["SELECT", "INSERT", "UPDATE", "DELETE"])
+    databases = optional(list(string), [])
   }))
   default = {}
 }

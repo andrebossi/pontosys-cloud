@@ -1,12 +1,118 @@
 ---
-# Only what's common to EVERY VM. Fluent Bit's base collection lives in
-# roles/observability_agent/defaults; whatever is role-specific goes in
-# role_<role>.yml.
+# ===========================================================================
+# EVERY VM
+#
+# Only what is true for the whole fleet. Anything that belongs to one role
+# goes in group_vars/role_<role>/, anything true for one machine in host_vars/.
+# ===========================================================================
 label_prefix: pscloud
 oci_region: sa-saopaulo-1
 compartment_ocid: "{{ lookup('env', 'OCI_COMPARTMENT_OCID') }}"
-vault_ocid: "{{ lookup('env', 'OCI_VAULT_OCID') }}"
 
-monitoring_private_ip: "{{ groups['role_monitoring'] | first | default('') }}"
+timezone: America/Sao_Paulo
 
-swap_size: 2G
+# ---------------------------------------------------------------------------
+# HOST SIZING — VM.Standard.E4.Flex, 1 OCPU (2 vCPU), 6 GB
+#
+# Every ceiling downstream is derived from these two numbers, so re-shaping
+# the VM is a two-line change and the app slice, the GC limits and the nginx
+# worker count follow.
+# ---------------------------------------------------------------------------
+host_vcpus: 2
+host_memory_mb: 6144
+
+# A 6 GB box running nine .NET processes has no memory to spare. Swap is not
+# there to run from -- it is there so a garbage collection spike gets pushed
+# to disk instead of tripping the OOM killer. MemorySwapMax per app keeps any
+# single one from living in it.
+swap_size_mb: 2048
+swap_file: /swapfile
+# 10 = swap only under real pressure. The default (60) would page out idle
+# Kestrel heaps and make the first request after a quiet period slow.
+swap_swappiness: 10
+
+# ---------------------------------------------------------------------------
+# ARTIFACT STORE
+#
+# OCI Object Storage holds both the application tarballs and the version
+# manifests. It is the bucket rather than GitHub for one reason above the
+# others: a machine reads it through a pre-authenticated URL minted by the
+# orchestrator, so an autoscaled VM needs no token of its own, and the traffic
+# goes over the service gateway instead of the NAT gateway.
+#
+# GitHub stays the source of record; CI mirrors a published release in here.
+# ---------------------------------------------------------------------------
+artifact_bucket: pscloud-artifacts
+
+# ---------------------------------------------------------------------------
+# WHERE TELEMETRY GOES
+#
+# One dictionary, consumed by roles/observability_agent. Changing the
+# monitoring server is one edit here -- no template and no task changes.
+# `host` is left as a variable so prod and rc can point at different backends.
+# ---------------------------------------------------------------------------
+monitoring_host: "{{ groups['role_monitoring'] | first | default('127.0.0.1') }}"
+
+monitoring_endpoints:
+  metrics:
+    host: "{{ monitoring_host }}"
+    port: 8428
+    uri: /api/v1/write
+  logs:
+    host: "{{ monitoring_host }}"
+    port: 9428
+    uri: /insert/loki/api/v1/push
+
+# ---------------------------------------------------------------------------
+# HOST TUNING
+#
+# Dictionaries, not task lists: adding a knob is one line and `sysctl -a`
+# stays comparable with what is declared here.
+# ---------------------------------------------------------------------------
+base_packages:
+  - jq
+  - curl
+  - ca-certificates
+  - sysstat
+  - iotop
+  - unzip
+  - tar
+  # ansible.posix.synchronize (the static content sync) needs it on both ends.
+  - rsync
+  # ansible.builtin.deb822_repository, used for the Fluent Bit repository.
+  - python3-debian
+
+base_sysctl:
+  # A .NET process reserves far more virtual address space than it touches.
+  # Strict accounting (0) refuses those reservations and the runtime aborts.
+  vm.overcommit_memory: "1"
+  vm.swappiness: "{{ swap_swappiness }}"
+  # Reclaim dentry/inode cache earlier: on a 6 GB box the page cache the apps
+  # actually need loses to metadata cache otherwise.
+  vm.vfs_cache_pressure: "150"
+  # nginx accept queue. The default 4096 on Ubuntu 24.04 is already fine; it
+  # is declared so a future kernel default change does not move it silently.
+  net.core.somaxconn: "4096"
+  net.ipv4.tcp_max_syn_backlog: "4096"
+  # nine Kestrel upstreams + the load balancer keepalives: connections in
+  # TIME_WAIT get reused instead of exhausting the ephemeral port range.
+  net.ipv4.tcp_tw_reuse: "1"
+  net.ipv4.ip_local_port_range: "10240 65535"
+  net.ipv4.tcp_fin_timeout: "15"
+  fs.file-max: "200000"
+  fs.inotify.max_user_instances: "512"
+
+# journald is the source Fluent Bit reads unit logs from. Uncapped it will eat
+# the root volume; too small and the agent loses events between flushes.
+journald_settings:
+  Storage: persistent
+  Compress: "yes"
+  SystemMaxUse: 512M
+  SystemMaxFileSize: 64M
+  RuntimeMaxUse: 64M
+  MaxRetentionSec: 7day
+  # journald drops messages in bursts and only warns afterwards -- it goes
+  # blind exactly during an incident. Raised well above the default 10000/30s.
+  RateLimitIntervalSec: 30s
+  RateLimitBurst: 20000
+  ForwardToSyslog: "no"

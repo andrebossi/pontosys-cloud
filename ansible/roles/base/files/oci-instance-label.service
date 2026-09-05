@@ -1,0 +1,13 @@
+[Unit]
+Description=OCI instance identity to /run/instance.env
+After=network-online.target
+Wants=network-online.target
+Before=fluent-bit.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/oci-instance-label.sh
+
+[Install]
+WantedBy=multi-user.target

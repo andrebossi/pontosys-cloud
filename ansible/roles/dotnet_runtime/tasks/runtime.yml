@@ -1,0 +1,49 @@
+---
+# One install root per runtime. See the comment on dotnet_runtimes in
+# group_vars/role_app/runtime.yml for why they are not stacked in one root.
+- name: "{{ rt.value.version }} — install root"
+  ansible.builtin.file:
+    path: "{{ dotnet_root }}/{{ rt.value.version }}"
+    state: directory
+    mode: "0755"
+
+- name: "{{ rt.value.version }} — ASP.NET Core runtime"
+  ansible.builtin.unarchive:
+    src: "{{ dotnet_download_base }}/aspnetcore/Runtime/{{ rt.value.version }}/{{ dotnet_package }}-{{ rt.value.version }}-linux-x64.tar.gz"
+    dest: "{{ dotnet_root }}/{{ rt.value.version }}"
+    remote_src: true
+    creates: "{{ dotnet_root }}/{{ rt.value.version }}/shared/Microsoft.AspNetCore.App/{{ rt.value.version }}"
+    extra_opts: [--no-same-owner]
+
+- name: "{{ rt.value.version }} — the host runs and reports itself"
+  ansible.builtin.command: "{{ dotnet_root }}/{{ rt.value.version }}/dotnet --list-runtimes"
+  environment:
+    LD_LIBRARY_PATH: "{{ dotnet_compat_dir }}/lib"
+    DOTNET_ROOT: "{{ dotnet_root }}/{{ rt.value.version }}"
+  register: dotnet_listed
+  changed_when: false
+  failed_when: >-
+    ('Microsoft.AspNetCore.App ' ~ rt.value.version) not in dotnet_listed.stdout
+    or ('Microsoft.NETCore.App ' ~ rt.value.version) not in dotnet_listed.stdout
+
+# The root must hold exactly ONE version of each shared framework. If a second
+# one appears, an app without an explicit rollforward policy can silently bind
+# to it, and the isolation this layout exists for is gone.
+- name: "{{ rt.value.version }} — the root is isolated to one version"
+  ansible.builtin.find:
+    paths: "{{ dotnet_root }}/{{ rt.value.version }}/shared/Microsoft.NETCore.App"
+    file_type: directory
+  register: dotnet_frameworks
+  changed_when: false
+  failed_when: dotnet_frameworks.files | length != 1
+
+# The crypto shim resolves OpenSSL at dlopen time. This checks the binary
+# actually asks for the 1.x soname we staged, rather than assuming it.
+- name: "{{ rt.value.version }} — crypto shim targets the staged OpenSSL"
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      strings {{ dotnet_root }}/{{ rt.value.version }}/shared/Microsoft.NETCore.App/{{ rt.value.version }}/libSystem.Security.Cryptography.Native.OpenSsl.so
+      | grep -qE 'libssl\.so\.1\.[01]|OPENSSL_1_1'
+    executable: /bin/bash
+  changed_when: false

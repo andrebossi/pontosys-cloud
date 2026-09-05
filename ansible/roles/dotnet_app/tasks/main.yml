@@ -1,8 +1,9 @@
 ---
-# units.yml e o que a imagem dourada leva assada; apps.yml depende de segredo e
-# so roda na maquina viva.
-- name: Units e limites
+# units.yml is what the golden image bakes: users, directories, the slice and
+# the unit files. config.yml reads secrets and only runs against a live
+# machine -- an image is shared by the whole fleet and must not carry any.
+- name: Units, slice and directories
   ansible.builtin.include_tasks: units.yml
 
-- name: Aplicacoes
-  ansible.builtin.include_tasks: apps.yml
+- name: Configuration and secrets
+  ansible.builtin.include_tasks: config.yml

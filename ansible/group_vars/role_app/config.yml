@@ -1,0 +1,124 @@
+---
+# ===========================================================================
+# APPLICATION CONFIGURATION
+#
+# Split by sensitivity, because the two halves want different handling:
+#
+#   app_settings_*   non-secret. Rendered into
+#                    /srv/apps/<app>/shared/appsettings.Production.json,
+#                    world-readable, diffable, reviewed in a pull request.
+#                    .NET loads appsettings.json from the artifact first and
+#                    then overlays this file (ASPNETCORE_ENVIRONMENT=Production),
+#                    so the artifact's own defaults stay untouched.
+#
+#   db_servers,      secret. Rendered into /etc/dotnet-apps/<app>.env as
+#   app_secrets      environment variables, 0640 root:dotnetapp. Environment
+#                    configuration outranks every JSON file, so this wins.
+#                    Values come from an ansible-vault file -- see vault.yml.
+#
+# Nesting in an env var uses "__": ConnectionStrings__VSGlobalContext maps to
+# the "VSGlobalContext" entry under "ConnectionStrings".
+# ===========================================================================
+
+app_public_url: "https://virtualstore.pontosys.com"
+
+# Applied to every app, then overlaid by the per-app block below.
+app_settings_common:
+  AllowedHosts: "*"
+  Logging:
+    LogLevel:
+      Default: Information
+      Microsoft.AspNetCore: Warning
+  UrlApis:
+    MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+    MonitorRelatorios: "{{ app_public_url }}/geradorrelatoriosapi"
+  LogCustom:
+    Graylog:
+      HostnameOrAddress: "{{ graylog_host }}"
+      Port: "{{ graylog_port }}"
+  Serilog:
+    MinimumLevel:
+      Default: Information
+      Override:
+        Microsoft: Fatal
+        Microsoft.Hosting.Lifetime: Fatal
+        Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager: Fatal
+        Serilog.AspNetCore.RequestLoggingMiddleware: Fatal
+
+# The apps already ship their own logs to Graylog through Serilog; Fluent Bit
+# collects the unit's stdout/stderr and the host on top of that.
+graylog_host: 187.77.254.127
+graylog_port: 12201
+
+# Per-app overlay. Only what differs from the common block.
+app_settings:
+  virtualstore:
+    Links:
+      UrlConfirmacaoEmail: "{{ app_public_url }}/#/confirmar-email/"
+      UrlRecupecaoSenha: "{{ app_public_url }}/app/#/recuperar-senha/"
+    EmailsFinanceiro:
+      - elvis@pontosys.com
+      - leandro@pontosys.com
+      - rafael@pontosys.com
+
+# ---------------------------------------------------------------------------
+# DATABASES
+#
+# Named servers, referenced by the `connections` map in the catalog. An app
+# names the .NET connection-string key it expects; this table says what that
+# key points at. Moving a schema to another server is one edit here.
+# ---------------------------------------------------------------------------
+db_servers:
+  global:
+    host: "{{ vault_db_global_host }}"
+    port: 3306
+    database: virtualstoreglobal
+    username: "{{ vault_db_global_user }}"
+    password: "{{ vault_db_global_password }}"
+  cep:
+    host: "{{ vault_db_cep_host }}"
+    port: 3306
+    database: cep
+    username: "{{ vault_db_cep_user }}"
+    password: "{{ vault_db_cep_password }}"
+
+# Extra options appended to every connection string. The pool ceiling is the
+# one that matters: nine apps x 2 VMs at the driver default of 100 would ask
+# for 1800 connections. Sized to stay under the server's max_connections.
+db_pool_max: 12
+db_connection_options: >-
+  persistsecurityinfo=True;SslMode=none;Convert Zero Datetime=true;
+  Maximum Pool Size={{ db_pool_max }};
+
+# ---------------------------------------------------------------------------
+# NON-DATABASE SECRETS
+#
+# Flat name -> value, injected as environment variables. The name is the .NET
+# configuration path with "__" for nesting.
+# ---------------------------------------------------------------------------
+app_secrets_common:
+  TokenConfigurations__Audience: "{{ vault_token_audience }}"
+  TokenConfigurations__Issuer: "{{ vault_token_issuer }}"
+  TokenConfigurations__Seconds: "86400"
+
+app_secrets:
+  virtualstore:
+    SmtpClientData__MailDisplayName: "Ponto.Sys Sistemas"
+    SmtpClientData__MailFrom: naoresponder@pontosys.com
+    SmtpClientData__MailHost: smtpi.kinghost.net
+    SmtpClientData__MailPort: "587"
+    SmtpClientData__MailEnableSsl: "true"
+    SmtpClientData__MailSuportePontoSys: rafael@pontosys.com
+    SmtpClientData__MailPass: "{{ vault_smtp_password }}"
+
+  monitorclientesapi:
+    TokenConfigurations__Audience: MonitorClientesVirtualStore
+    TokenConfigurations__Issuer: "Ponto.Sys Sistemas"
+    TokenConfigurations__Key: "{{ vault_monitorclientes_token_key }}"
+    TokenConfigurations__HoursExpires: "12"
+
+  geradorrelatoriosapi:
+    TokenConfigurations__Audience: MonitorClientesVirtualStore
+    TokenConfigurations__Issuer: "Ponto.Sys Sistemas"
+    TokenConfigurations__Key: "{{ vault_monitorclientes_token_key }}"
+    TokenConfigurations__HoursExpires: "12"

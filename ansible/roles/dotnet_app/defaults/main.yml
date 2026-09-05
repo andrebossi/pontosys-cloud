@@ -1,38 +1,28 @@
 ---
-apps_slice_memory_high: 4.5G
-apps_slice_memory_max: 5G
-apps_slice_memory_swap_max: 1G
-apps_slice_cpu_quota: 170%
-app_tiers:
-  site:
-    memory_min: 128M
-    memory_high: 550M
-    memory_max: 700M
-    memory_swap_max: 256M
-    cpu_quota: 80%
-    cpu_weight: 200
-    io_weight: 150
-  api:
-    memory_min: 96M
-    memory_high: 300M
-    memory_max: 400M
-    memory_swap_max: 128M
-    cpu_quota: 50%
-    cpu_weight: 100
-    io_weight: 100
-  critical:
-    memory_min: 160M
-    memory_high: 400M
-    memory_max: 500M
-    memory_swap_max: 0
-    cpu_quota: 100%
-    cpu_weight: 400
-    io_weight: 300
-  batch:
-    memory_min: 96M
-    memory_high: 550M
-    memory_max: 700M
-    memory_swap_max: 512M
-    cpu_quota: 60%
-    cpu_weight: 50
-    io_weight: 20
+app_deploy_root: /srv/apps
+app_deploy_user: dotnetapp
+app_config_dir: /etc/dotnet-apps
+app_dumps_dir: /var/lib/dotnet-dumps
+
+applications: {}
+app_tiers: {}
+dotnet_runtime_env: {}
+app_settings_common: {}
+app_settings: {}
+app_secrets_common: {}
+app_secrets: {}
+db_servers: {}
+db_connection_options: ""
+
+# ASP.NET Core does not call sd_notify unless the app was built with
+# .UseSystemd(). Type=notify on an app that does not would make systemd wait
+# out TimeoutStartSec and then declare a working app failed. `exec` is the
+# honest default: it catches an exec failure but does not pretend to know when
+# the app is ready -- that is what the deploy health check is for.
+app_systemd_type: exec
+
+# Set at the runtime layer; repeated here so the role can be used on its own.
+dotnet_root: /opt/dotnet
+dotnet_compat_dir: /opt/dotnet/compat
+dotnet_default_runtime: "5.0"
+dotnet_host_icu_version: "74"

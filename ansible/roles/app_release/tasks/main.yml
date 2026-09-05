@@ -1,0 +1,68 @@
+---
+# Ubuntu 24.04 is PEP 668: pip against the system Python is refused. A
+# dedicated venv avoids --break-system-packages. Shared with app_image and
+# app_canary, which is why the path is the same for all three.
+- name: Python venv and pip
+  ansible.builtin.apt:
+    name: [python3-venv, python3-pip]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Driver directory
+  ansible.builtin.file:
+    path: "{{ release_venv | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: requirements.txt
+  ansible.builtin.copy:
+    src: requirements.txt
+    dest: "{{ release_venv | dirname }}/requirements.txt"
+    mode: "0644"
+  register: release_reqs
+
+- name: OCI SDK in the venv
+  ansible.builtin.pip:
+    requirements: "{{ release_venv | dirname }}/requirements.txt"
+    virtualenv: "{{ release_venv }}"
+    virtualenv_command: python3 -m venv
+    state: present
+  when: release_reqs is changed or not ansible_check_mode
+
+- name: Release driver
+  ansible.builtin.copy:
+    src: release.py
+    dest: "{{ release_venv | dirname }}/release.py"
+    mode: "0755"
+
+- name: Shortcut in /usr/local/bin
+  ansible.builtin.copy:
+    dest: /usr/local/bin/release
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      exec {{ release_venv }}/bin/python {{ release_venv | dirname }}/release.py \
+        --bucket={{ artifact_bucket }} "$@"
+
+- name: "release {{ release_action }}"
+  when: release_action != 'none'
+  block:
+    - name: Run
+      ansible.builtin.command:
+        argv: >-
+          {{ ['/usr/local/bin/release', release_action]
+             + ([release_from_env] if release_action in ['show', 'list'] else [])
+             + ([release_to_env] if release_action in ['publish', 'rollback'] else [])
+             + (['--from', release_from_env, '--to', release_to_env]
+                if release_action == 'promote' else [])
+             + (['--release', release_tag]
+                if release_action in ['publish', 'rollback'] else [])
+             + (['--apps', release_apps, '--base-commit', release_base_commit]
+                if release_action == 'publish' else []) }}
+      register: release_run
+      changed_when: release_action in ['publish', 'promote', 'rollback']
+
+    - name: Result
+      ansible.builtin.debug:
+        msg: "{{ release_run.stdout_lines }}"

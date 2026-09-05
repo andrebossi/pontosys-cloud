@@ -1,0 +1,19 @@
+# {{ ansible_managed }}
+#
+# stub_status on loopback: active, reading, writing and waiting connections
+# plus the accepted/handled/requests counters. This is what Fluent Bit's
+# nginx_metrics input scrapes -- no separate nginx-exporter process.
+server {
+    listen 127.0.0.1:{{ nginx_status_port }};
+    server_name _;
+
+    access_log off;
+
+    location = /nginx_status {
+        stub_status on;
+    }
+
+    location / {
+        return 404;
+    }
+}

@@ -4,9 +4,6 @@ API_Monitor_Client - banco global com endereços de connection, recebe requests 
 * instalar somente o runtime do dotnet 5.0.15
 * instalar somente o runtime do dotnet 2.1.30
 
-# nginx
-
-
 # Apps
 
 ## Config

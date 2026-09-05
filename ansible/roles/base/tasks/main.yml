@@ -1,43 +1,63 @@
 ---
-- name: Fuso horario
-  ansible.builtin.timezone:
-    name: America/Sao_Paulo
+- name: Timezone
+  community.general.timezone:
+    name: "{{ timezone }}"
 
-- name: Sysctl
-  ansible.posix.sysctl:
-    name: "{{ item.k }}"
-    value: "{{ item.v }}"
-    state: present
-    reload: true
-  loop:
-    - { k: vm.overcommit_memory, v: "1" }
-    - { k: net.core.somaxconn, v: "4096" }
-    - { k: net.ipv4.tcp_max_syn_backlog, v: "4096" }
-    - { k: net.ipv4.tcp_tw_reuse, v: "1" }
-    - { k: fs.file-max, v: "200000" }
-
-- name: Ferramentas de operacao
+- name: Operational tooling
   ansible.builtin.apt:
-    name: [jq, curl, python3-oci-cli, sysstat, iotop]
+    name: "{{ base_packages }}"
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
-- name: Script de identidade OCI
+- name: Kernel tuning
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    sysctl_file: /etc/sysctl.d/60-pscloud.conf
+    state: present
+    reload: true
+  loop: "{{ base_sysctl | dict2items }}"
+  loop_control:
+    label: "{{ item.key }} = {{ item.value }}"
+
+- name: Swap
+  ansible.builtin.include_tasks: swap.yml
+  when: swap_size_mb | int > 0
+
+- name: journald drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/journald.conf.d
+    state: directory
+    mode: "0755"
+
+- name: journald limits
+  ansible.builtin.template:
+    src: journald.conf.j2
+    dest: /etc/systemd/journald.conf.d/10-pscloud.conf
+    mode: "0644"
+  notify: restart journald
+
+# Reads the instance metadata service and writes /run/instance.env, which
+# every agent unit sources. It is what puts the OCI identity -- instance name,
+# fault domain, role tag -- on each metric and log line without Ansible having
+# to bake anything machine-specific into the image.
+- name: OCI identity script
   ansible.builtin.copy:
+    src: oci-instance-label.sh
     dest: /usr/local/bin/oci-instance-label.sh
     mode: "0755"
-    content: |
-      #!/usr/bin/env bash
-      set -euo pipefail
-      MD=$(curl -sf -H "Authorization: Bearer Oracle" \
-             http://169.254.169.254/opc/v2/instance/)
-      {
-        echo "INSTANCE_ID=$(jq -r .id <<<"$MD")"
-        echo "INSTANCE_NAME=$(jq -r .displayName <<<"$MD")"
-        echo "SHAPE=$(jq -r .shape <<<"$MD")"
-        echo "AD=$(jq -r .availabilityDomain <<<"$MD")"
-        echo "FD=$(jq -r .faultDomain <<<"$MD")"
-        echo "REGION=$(jq -r .canonicalRegionName <<<"$MD")"
-        echo "ROLE=$(jq -r '.definedTags.pscloud.role // "unknown"' <<<"$MD")"
-      } > /run/instance.env
-      chmod 0644 /run/instance.env
+
+- name: OCI identity unit
+  ansible.builtin.copy:
+    src: oci-instance-label.service
+    dest: /etc/systemd/system/oci-instance-label.service
+    mode: "0644"
+  notify: reload systemd
+
+- name: OCI identity runs at boot
+  ansible.builtin.systemd:
+    name: oci-instance-label.service
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -1,5 +1,6 @@
 ---
 collections:
+  # Official NGINX collection: `nginx` installs and manages the service.
   - name: nginxinc.nginx_core
     version: ">=0.8.0"
   - name: oracle.oci

@@ -1,0 +1,8 @@
+---
+timezone: America/Sao_Paulo
+base_packages: []
+base_sysctl: {}
+journald_settings: {}
+swap_size_mb: 0
+swap_file: /swapfile
+swap_swappiness: 10

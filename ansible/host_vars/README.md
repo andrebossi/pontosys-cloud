@@ -1,30 +1,22 @@
 # host_vars
 
-One file per machine, named after `ansible_host` (the dynamic inventory uses
-`hostname_format: private_ip`, so the name is the private IP).
+One file per machine, named after `ansible_host`. The dynamic inventory uses
+`hostname_format: private_ip`, so the name is the private IP.
 
-This is for what's true for **one** machine only — and nothing more. Example:
+This is for what is true for **one** machine and nothing more:
 
 ```yaml
-# host_vars/10.20.32.10.yml
-grafana_admin_password: "{{ vault_grafana_password }}"
+# host_vars/10.20.16.5.yml
 
-# Extra collection for this machine only, added to what comes from all.yml.
-fluentbit_inputs_host:
+# Extra collection for this machine only, added to what already comes from
+# group_vars -- the *_extra_* lists are concatenated, never replaced.
+fluentbit_extra_inputs:
   - name: tail
     tag: custom.audit
     path: /var/log/audit/audit.log
     parser: syslog-rfc5424
     db: /var/lib/fluent-bit/audit.db
-
-fluentbit_outputs_host:
-  - name: loki
-    match: custom.audit
-    host: "{{ monitoring_private_ip }}"
-    port: 9428
-    uri: /insert/loki/api/v1/push
-    labels: job=audit,instance=${INSTANCE_NAME}
 ```
 
-The `*_host` lists are **added** to `*_common` and `*_role`, never replacing
-them — see the comment in `group_vars/all.yml`.
+An application-level override belongs in the catalog entry, not here: a limit
+that is right for one machine is almost always right for the role.

@@ -86,18 +86,6 @@ fluentbit_extra_filters:
       /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
     action: include
 
-fluentbit_extra_outputs:
-  # On this VM the destination is local: sending to 127.0.0.1 avoids depending
-  # on the very network being observed.
-  - name: loki
-    match: host.err
-    host: 127.0.0.1
-    port: 9428
-    uri: /insert/loki/api/v1/push
-    labels: job=host,instance=${INSTANCE_NAME},fd=${FD}
-    label_keys: $unit
-    line_format: json
-    retry_limit: 5
-    storage.total_limit_size: 256M
-
-monitoring_private_ip: 127.0.0.1
+# On this VM the backends are local. Sending to 127.0.0.1 means the machine's
+# own telemetry does not depend on the network it is there to observe.
+monitoring_host: 127.0.0.1

@@ -1,0 +1,116 @@
+---
+# ===========================================================================
+# WHAT THIS VM SENDS
+#
+# Lists of dictionaries appended to roles/observability_agent's base
+# collection. Adding a source is one entry -- no task and no template change.
+# ===========================================================================
+fluentbit_extra_inputs:
+
+  # Application unit logs. The slice filter is what gives the collection its
+  # identity: without Slice=apps.slice on the unit, an app runs but is
+  # invisible here.
+  - name: systemd
+    tag: app.log
+    systemd_filter:
+      - _SYSTEMD_SLICE=apps.slice
+    strip_underscores: true
+    read_from_tail: true
+    max_entries: 1000
+    db: /var/lib/fluent-bit/systemd-apps.db
+    storage.type: filesystem
+    threaded: "on"
+
+  # nginx access log in JSON. This is the source of the access rate, the
+  # status-code breakdown and the latency histogram.
+  - name: tail
+    tag: nginx.access
+    path: "{{ nginx_access_log }}"
+    parser: nginx_json
+    refresh_interval: 5
+    mem_buf_limit: 8MB
+    skip_long_lines: "on"
+    db: /var/lib/fluent-bit/nginx_access.db
+    storage.type: filesystem
+    threaded: "on"
+
+  # stub_status: active / accepted / handled connections and total requests.
+  # This is "nginx load" -- concurrency, as opposed to the request rate that
+  # comes out of the access log.
+  - name: nginx_metrics
+    tag: nginx_metrics
+    host: 127.0.0.1
+    port: "{{ nginx_status_port }}"
+    status_url: /nginx_status
+    nginx_plus: "off"
+    scrape_interval: 30
+
+fluentbit_extra_filters:
+  - name: lua
+    match: app.log
+    script: systemd_classify.lua
+    call: classify
+
+  # Requests by app, status and method. stub_status has no status code, so
+  # without this there is no 5xx series and no app-down alert to build on.
+  - name: log_to_metrics
+    match: nginx.access
+    tag: nginx_req_metrics
+    metric_mode: counter
+    metric_name: nginx_requests
+    metric_description: Requests by app, status and method
+    label_field:
+      - app
+      - status
+      - method
+
+  # request_time is emitted unquoted (numeric) on purpose. upstream_time
+  # arrives quoted and can be empty or comma-separated when more than one
+  # upstream was tried -- unusable as a value_field.
+  - name: log_to_metrics
+    match: nginx.access
+    tag: nginx_req_metrics
+    metric_mode: histogram
+    metric_name: nginx_request_duration_seconds
+    metric_description: Request latency
+    value_field: request_time
+    label_field:
+      - app
+      - status
+
+fluentbit_extra_outputs:
+  - name: loki
+    match: app.log
+    host: "{{ monitoring_endpoints.logs.host }}"
+    port: "{{ monitoring_endpoints.logs.port }}"
+    uri: "{{ monitoring_endpoints.logs.uri }}"
+    labels: job=app,instance=${INSTANCE_NAME},fd=${FD},pool=${POOL}
+    label_keys: $unit,$kind
+    line_format: json
+    remove_keys: BOOT_ID,MACHINE_ID,CAP_EFFECTIVE,SYSTEMD_CGROUP,SYSTEMD_INVOCATION_ID,SYSTEMD_SLICE,SOURCE_REALTIME_TIMESTAMP,SELINUX_CONTEXT,AUDIT_SESSION,AUDIT_LOGINUID,STREAM_ID,SYSLOG_FACILITY
+    retry_limit: 5
+    storage.total_limit_size: 256M
+
+  - name: loki
+    match: nginx.access
+    host: "{{ monitoring_endpoints.logs.host }}"
+    port: "{{ monitoring_endpoints.logs.port }}"
+    uri: "{{ monitoring_endpoints.logs.uri }}"
+    labels: job=nginx,instance=${INSTANCE_NAME},fd=${FD},pool=${POOL}
+    label_keys: $app,$status
+    line_format: json
+    retry_limit: 5
+    storage.total_limit_size: 256M
+
+fluentbit_extra_files:
+  - systemd_classify.lua
+
+# The built-in node_exporter_metrics `processes` collector only counts
+# processes by state -- no per-process CPU or memory. Since every app runs
+# under its own MemoryMax and CPUQuota, without this exporter per-app
+# throttling and OOM kills are invisible, which is the whole point of the
+# cgroup limits.
+textfile_exporters:
+  - name: cgroup
+    src: cgroup-textfile-exporter.sh
+    interval: 30

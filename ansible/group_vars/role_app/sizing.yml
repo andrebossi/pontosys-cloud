@@ -1,0 +1,114 @@
+---
+# ===========================================================================
+# RESOURCE BUDGET — 2 vCPU, 6 GB, nine .NET processes
+#
+# Nothing here is a guess about "how much does this app use": these are
+# CEILINGS. The point of the two-level scheme is that a single misbehaving
+# app cannot take the box down, and the nine of them together cannot either.
+#
+#   apps.slice   ceiling for the GROUP
+#     └ dotnet-app@<name>.service   ceiling for ONE app (per-tier drop-in)
+#
+# Memory map of the 6 GB:
+#
+#   apps.slice          ~4.4 GB   MemoryMax below, hard
+#   kernel + OS          ~0.5 GB
+#   nginx (2 workers)    ~0.1 GB
+#   fluent-bit           ~0.1 GB   MemoryMax in observability_agent
+#   page cache            ~0.9 GB  what is left, and it matters: it is what
+#                                  keeps .dll reads off the disk
+# ===========================================================================
+
+# Everything outside apps.slice. Raise it if the box gains another resident
+# service; the slice ceilings follow automatically.
+apps_slice_reserve_mb: 1600
+
+apps_slice_memory_max: "{{ host_memory_mb - apps_slice_reserve_mb }}M"
+apps_slice_memory_high: "{{ ((host_memory_mb - apps_slice_reserve_mb) * 0.9) | int }}M"
+apps_slice_memory_swap_max: 1G
+# 85% of the box. The remaining 15% is what lets nginx answer and sshd accept
+# a login while the apps are pinned -- without it an incident is unreachable.
+apps_slice_cpu_quota: "{{ (host_vcpus * 100 * 0.85) | int }}%"
+
+# ---------------------------------------------------------------------------
+# TIERS
+#
+# MemoryHigh is a SOFT ceiling: crossing it makes the kernel apply reclaim
+# pressure and throttle the process, which is the window where the .NET GC
+# still has time to react. MemoryMax is hard, and crossing it is an OOM kill.
+# The distance between the two is the safety margin.
+#
+# CPUQuota is a ceiling, CPUWeight decides who wins a contended core. Both
+# matter: the quota is also what makes the kernel fill in throttled_usec in
+# cpu.stat, which is where the throttling metric comes from.
+#
+# The sum of memory_max across the catalog is deliberately just under
+# apps_slice_memory_max -- the slice is the backstop, not the plan.
+# ---------------------------------------------------------------------------
+app_tiers:
+  site:
+    # The storefront: largest working set, most traffic.
+    memory_min: 128M
+    memory_high: 700M
+    memory_max: 900M
+    memory_swap_max: 256M
+    cpu_quota: 100%
+    cpu_weight: 200
+    io_weight: 150
+
+  api:
+    memory_min: 96M
+    memory_high: 300M
+    memory_max: 420M
+    memory_swap_max: 128M
+    cpu_quota: 60%
+    cpu_weight: 100
+    io_weight: 100
+
+  critical:
+    # Payments and the global directory. No swap: a paged-out payment handler
+    # adds seconds of latency to the one request that must not hang.
+    memory_min: 128M
+    memory_high: 350M
+    memory_max: 450M
+    memory_swap_max: 0
+    cpu_quota: 120%
+    cpu_weight: 400
+    io_weight: 300
+
+  batch:
+    # Report rendering: heavy, bursty, and tolerant of being slow. Lowest
+    # CPU and IO weight, so a 40-page NFe PDF never delays a sale.
+    memory_min: 96M
+    memory_high: 500M
+    memory_max: 700M
+    memory_swap_max: 512M
+    cpu_quota: 70%
+    cpu_weight: 50
+    io_weight: 20
+
+# ---------------------------------------------------------------------------
+# .NET RUNTIME TUNING
+#
+# Applied to every app unit. The COMPlus_ prefix is deliberate: DOTNET_ as a
+# runtime-configuration prefix only became valid in .NET 6. Written as
+# DOTNET_gcServer here it would not error -- it would be ignored, and every
+# app would come up with Server GC.
+# ---------------------------------------------------------------------------
+dotnet_runtime_env:
+  # Workstation GC. Server GC allocates a heap and a dedicated thread PER CORE
+  # PER PROCESS: nine processes on 2 cores would mean 18 heaps competing for
+  # 4.4 GB. This is the single most important setting on this box.
+  COMPlus_gcServer: "0"
+  # Percentage of the cgroup's memory limit the GC may use as heap, IN
+  # HEXADECIMAL. 4B = 75. Leaves room for the non-heap side of the process
+  # (JIT, loader, stacks) inside MemoryMax.
+  COMPlus_GCHeapHardLimitPercent: "4B"
+  # Trades a little CPU for a smaller resident set at every collection.
+  COMPlus_GCConserveMemory: "3"
+  # Off by default anyway; pinned because a background GC thread per process
+  # is measurable when there are nine of them.
+  COMPlus_gcConcurrent: "0"
+  DOTNET_NOLOGO: "1"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  ASPNETCORE_ENVIRONMENT: "Production"

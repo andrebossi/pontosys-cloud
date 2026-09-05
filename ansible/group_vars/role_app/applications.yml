@@ -1,0 +1,142 @@
+---
+# ===========================================================================
+# APPLICATION CATALOG
+#
+# One dictionary. Adding an application is one entry here -- no role, task or
+# template changes. Everything downstream is generated from it:
+#
+#   systemd    dotnet-app@<name>.service + a drop-in with its limits
+#   nginx      an upstream and a `location <path>` on the public server
+#   deploy     which GitHub release asset lands in /srv/apps/<name>
+#   config     shared/appsettings.Production.json and the secret env file
+#   telemetry  the `app` label on every log line and request metric
+#
+# Keys
+#   dll          entry assembly, as produced by `dotnet publish`
+#   port         local Kestrel port, always bound to 127.0.0.1. These are the
+#                SAME ports the previous machine used: an app that pins its
+#                own URL in Program.cs ignores ASPNETCORE_URLS, and keeping
+#                the numbers means it still lands where nginx expects it.
+#   path         nginx location prefix. Requests reach Kestrel with the prefix
+#                INTACT (no trailing slash on proxy_pass), because the apps
+#                generate absolute URLs off it -- see UrlApis in appsettings.
+#   tier         resource and timeout class; see app_tiers / app_nginx_tiers.
+#   runtime      key into dotnet_runtimes. Omitted = dotnet_default_runtime.
+#   drawing      pulls in libgdiplus + the MS fonts (System.Drawing).
+#   linked_dirs  directories that hold STATE and must survive a release.
+#                They live in /srv/apps/<name>/shared and are symlinked into
+#                each release. Client certificates and generated reports are
+#                not in the artifact and must not be wiped by a deploy.
+#   connections  .NET connection-string name -> key in db_servers.
+#   asset        release asset name, when it differs from "<name>.tar.gz".
+# ===========================================================================
+
+applications:
+
+  virtualstore:
+    description: Virtual Store — vendas (the storefront API)
+    dll: VirtualStore.Vendas.Service.Api.dll
+    port: 5000
+    path: /virtualstore
+    tier: site
+    drawing: true
+    linked_dirs: [logs, Contents, Relatorios]
+    connections:
+      VSGlobalContext: global
+      CepContext: cep
+
+  monitorclientesapi:
+    # The global client directory: every other API resolves connection data
+    # through it, so it is treated as critical even though it is small.
+    description: Monitor de clientes — global directory
+    dll: MonitorClientes.Monitoramento.WebApi.dll
+    port: 5002
+    path: /monitorclientesapi
+    tier: critical
+    connections:
+      MonitoramentoContext: global
+
+  dashsapi:
+    description: Dashboards
+    dll: VirtualStore.Dashboards.Api.dll
+    port: 5003
+    path: /dashsapi
+    tier: api
+    connections: {}
+
+  relatoriosapi:
+    description: Relatórios (NFe/NFCe rendering)
+    dll: VirtualStore.Relatorios.Api.dll
+    port: 5004
+    path: /relatoriosapi
+    tier: batch
+    drawing: true
+    linked_dirs: [Relatorios, Fonts]
+    connections: {}
+
+  geradorrelatoriosapi:
+    description: Gerador de relatórios
+    dll: MonitorClientes.Relatorio.WebApi.dll
+    port: 5005
+    path: /geradorrelatoriosapi
+    tier: batch
+    connections:
+      RelatoriosContext: global
+
+  cadastrosapi:
+    description: Cadastros
+    dll: VirtualStore.Cadastros.Api.dll
+    port: 5006
+    path: /cadastrosapi
+    tier: api
+    linked_dirs: [ArquivosFiscais]
+    connections:
+      CepContext: cep
+
+  entradaapi:
+    description: Entradas de mercadoria
+    dll: VirtualStore.Entradas.API.dll
+    port: 5007
+    path: /entradaapi
+    tier: api
+    connections:
+      VSGlobalContext: global
+      CepContext: cep
+
+  pixapi:
+    # Payments. Holds per-client certificates under Contents/Clientes, which
+    # is why that directory is linked and never shipped in the artifact.
+    description: Integração PIX
+    dll: VirtualStore.Integrations.Pix.Api.dll
+    port: 5008
+    path: /pixapi
+    tier: critical
+    linked_dirs: [Contents]
+    connections: {}
+
+# ---------------------------------------------------------------------------
+# STATIC CONTENT
+#
+# The Ionic storefront at / and the two Flutter builds. Served straight from
+# disk by nginx -- they never touch a Kestrel process.
+#
+# spa: false, deliberately. `try_files $uri $uri/ <index>` would answer every
+# unknown path with the shell and a 200, and the 404 page would never fire
+# again. These builds route on the fragment (/#/confirmar-email/, see Links in
+# appsettings), which the browser never sends to the server -- so the fallback
+# buys nothing and costs the error page. Set spa: true on a site that moves to
+# path-based routing.
+# ---------------------------------------------------------------------------
+static_sites:
+  root:
+    path: /
+    spa: false
+    index: /index.html
+  app:
+    path: /app
+    spa: false
+    index: /app/index.html
+  monitorclientes:
+    path: /monitorclientes
+    spa: false
+    index: /monitorclientes/index.html

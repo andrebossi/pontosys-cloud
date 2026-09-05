@@ -1,0 +1,16 @@
+---
+# ===========================================================================
+# RC — the mutable environment
+#
+# Fixed instances, not a pool (see ARCHITECTURE.md), so the machines have
+# stable addresses and nothing replaces them underneath a deploy. That is what
+# makes in-place delivery the right fit here: RC exists to shorten the loop,
+# and minting an image per candidate would defeat that.
+#
+# The bargain is that RC must leave a RECORD. Every deploy publishes a
+# manifest, and that manifest -- not a fresh resolution of "latest" -- is what
+# gets promoted and baked. Without it, prod would ship something adjacent to
+# what RC tested rather than the same thing.
+# ===========================================================================
+app_version_source: latest
+app_manifest_write: true

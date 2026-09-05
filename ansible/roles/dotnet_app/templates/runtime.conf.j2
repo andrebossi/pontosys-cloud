@@ -1,0 +1,37 @@
+# {{ ansible_managed }}
+{% set app = item.value %}
+{% set rt_key = app.runtime | default(dotnet_default_runtime) %}
+{% set rt = dotnet_runtimes[rt_key] %}
+{% set root = dotnet_root ~ '/' ~ rt.version %}
+{% set home = app_deploy_root ~ '/' ~ item.key %}
+# {{ app.description | default(item.key) }}
+# runtime {{ rt.version }} ({{ root }})
+[Service]
+# The template unit has no ExecStart. It is set here because the runtime is a
+# per-application choice, and systemd will not expand a variable into the
+# executable path -- it has to be literal.
+ExecStart={{ root }}/dotnet {{ home }}/current/{{ app.dll }}
+
+# Pins the app to its own runtime root. Without DOTNET_ROOT the host would
+# fall back to searching, and the isolation between {{ dotnet_runtimes.keys() | join(' and ') }} would be
+# a matter of PATH order.
+Environment=DOTNET_ROOT={{ root }}
+# OpenSSL 1.1, staged privately rather than installed system-wide.
+Environment=LD_LIBRARY_PATH={{ dotnet_compat_dir }}/lib
+{% if rt.icu | default('host') == 'invariant' %}
+# Globalization-invariant: starts anywhere, but pt-BR dates, currency and
+# string comparison fall back to the invariant culture.
+Environment=DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1
+{% else %}
+# This runtime only probes libicuuc.so.<=67 and the host has {{ dotnet_host_icu_version }}, so the
+# version is handed to it directly.
+Environment=CLR_ICU_VERSION_OVERRIDE={{ dotnet_host_icu_version }}
+{% endif %}
+{% for k, v in dotnet_runtime_env.items() %}
+Environment={{ k }}={{ v }}
+{% endfor %}
+
+# ProtectSystem=strict makes the whole filesystem read-only. These are the
+# only paths the application may write, and they are the ones that survive a
+# release: certificates, generated reports, fiscal tables.
+ReadWritePaths={{ home }}/shared

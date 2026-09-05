@@ -1,5 +1,5 @@
 ---
-- name: Native runtime dependencies
+- name: Native dependencies
   ansible.builtin.apt:
     name:
       - ca-certificates
@@ -8,57 +8,40 @@
       - libgssapi-krb5-2
       - libstdc++6
       - zlib1g
-      - libicu-dev
+      - libicu74
     state: present
     update_cache: true
+    cache_valid_time: 3600
 
-- name: libssl1.1 (missing since Ubuntu 22.04)
-  when: dotnet_needs_libssl11 | bool
-  block:
-    - name: Download the package
-      ansible.builtin.get_url:
-        url: "{{ dotnet_libssl11_url }}"
-        dest: /tmp/libssl1.1.deb
-        mode: "0644"
-
-    - name: Install
-      ansible.builtin.apt:
-        deb: /tmp/libssl1.1.deb
-        state: present
-
-- name: ASP.NET Core Runtime {{ dotnet_version }}
-  ansible.builtin.unarchive:
-    src: "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/{{ dotnet_version }}/aspnetcore-runtime-{{ dotnet_version }}-linux-x64.tar.gz"
-    dest: "{{ dotnet_install_dir }}"
-    remote_src: true
-    creates: "{{ dotnet_install_dir }}/shared/Microsoft.AspNetCore.App/{{ dotnet_version }}"
-    extra_opts: [--no-same-owner]
-
-- name: Link in /usr/bin
-  ansible.builtin.file:
-    src: "{{ dotnet_install_dir }}/dotnet"
-    dest: /usr/bin/dotnet
-    state: link
-
-- name: Runtime responds
-  ansible.builtin.command: dotnet --list-runtimes
-  register: dotnet_runtimes
-  changed_when: false
-  failed_when: dotnet_version not in dotnet_runtimes.stdout
-
-
-- name: libssl.so.1.1 present and loadable
-  ansible.builtin.command: ldconfig -p
-  register: ldconfig_out
-  changed_when: false
-  failed_when: "'libssl.so.1.1' not in ldconfig_out.stdout"
-  when: dotnet_needs_libssl11 | bool
-
-- name: The .NET crypto provider finds the right OpenSSL
+# These runtimes probe for libicuuc.so.<n> from 67 downwards and Ubuntu 24.04
+# ships 74, so the version has to be handed to them explicitly through
+# CLR_ICU_VERSION_OVERRIDE. Detected rather than hardcoded, so a distribution
+# upgrade does not silently break globalization on every app at once.
+- name: Host ICU version
   ansible.builtin.shell:
     cmd: >-
       set -o pipefail;
-      strings {{ dotnet_install_dir }}/shared/Microsoft.NETCore.App/{{ dotnet_version }}/libSystem.Security.Cryptography.Native.OpenSsl.so
-      | grep -qE 'libssl\.so\.1\.1|OPENSSL_1_1'
+      ls /usr/lib/x86_64-linux-gnu/libicuuc.so.* 2>/dev/null
+      | sed -E 's/.*libicuuc\.so\.([0-9]+).*/\1/' | sort -rn | head -1
     executable: /bin/bash
+  register: host_icu
   changed_when: false
+  failed_when: host_icu.stdout | trim == ""
+
+- name: ICU version is a fact for the unit drop-ins
+  ansible.builtin.set_fact:
+    dotnet_host_icu_version: "{{ host_icu.stdout | trim }}"
+
+- name: OpenSSL 1.1 compatibility (private to the app units)
+  ansible.builtin.include_tasks: compat.yml
+
+- name: Runtimes
+  ansible.builtin.include_tasks: runtime.yml
+  loop: "{{ dotnet_runtimes | dict2items }}"
+  loop_control:
+    loop_var: rt
+    label: "{{ rt.key }} -> {{ rt.value.version }}"
+
+- name: System.Drawing support
+  ansible.builtin.include_tasks: drawing.yml
+  when: dotnet_install_drawing | bool

@@ -48,7 +48,7 @@ inputs = {
 
   shape         = "VM.Standard.E4.Flex"
   ocpus         = 1
-  memory_in_gbs = 6
+  memory_in_gbs = 4
 
   subnet_id = dependency.network.outputs.subnet_ids.app
   nsg_ids   = [dependency.network.outputs.nsg_ids.app]

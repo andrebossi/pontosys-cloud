@@ -18,7 +18,7 @@ variable "availability_domain" { type = string }
 
 variable "base_os_version" {
   type    = string
-  default = "22.04"
+  default = "24.04"
 }
 
 variable "shape" {
@@ -39,6 +39,21 @@ variable "memory_in_gbs" {
 variable "release_id" {
   type    = string
   default = ""
+}
+
+# Which environment's manifest the image is built from. The image is a
+# function of this repository plus that manifest -- never a snapshot of a
+# machine that has served traffic.
+variable "manifest_env" {
+  type    = string
+  default = "prod"
+}
+
+# Bake the applications in. false produces a base-layer-only image: the
+# runtimes, nginx, the agent and the unit files, with no application code.
+variable "bake_apps" {
+  type    = bool
+  default = true
 }
 
 locals {
@@ -75,6 +90,10 @@ source "oracle-oci" "app" {
     pscloud_built_by = "packer"
     pscloud_release  = local.release
     pscloud_base_os  = var.base_os_version
+    # Which manifest went in. `image prune` protects images an instance pool
+    # references; this is what lets a human tell two builds apart.
+    pscloud_manifest = var.manifest_env
+    pscloud_has_apps = tostring(var.bake_apps)
   }
 
   instance_tags = {
@@ -97,7 +116,8 @@ build {
     playbook_file = "${path.root}/../ansible/image.yml"
     user          = "ubuntu"
     extra_arguments = [
-      "--extra-vars", "packer_build=true release_id=${local.release}",
+      "--extra-vars",
+      "packer_build=true release_id=${local.release} image_manifest_env=${var.manifest_env} image_bake_apps=${var.bake_apps}",
       "--scp-extra-args", "-O",
     ]
   }

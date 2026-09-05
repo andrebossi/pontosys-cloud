@@ -1,0 +1,144 @@
+# {{ ansible_managed }}
+#
+# Generated from `applications` and `static_sites` in group_vars/role_app/.
+# Adding an application changes this file only through the catalog.
+
+{% for name, app in applications.items() %}
+upstream {{ name }}_up {
+    server 127.0.0.1:{{ app.port }} max_fails={{ app_upstream_max_fails }} fail_timeout={{ app_upstream_fail_timeout }};
+    # Kept-alive connections to Kestrel. Without this every request pays a
+    # TCP handshake to loopback -- small, but it is {{ applications | length }} apps' worth of it.
+    keepalive {{ app_upstream_keepalive }};
+}
+
+{% endfor %}
+server {
+    listen {{ nginx_listen_port }} default_server;
+    listen [::]:{{ nginx_listen_port }} default_server;
+    server_name _;
+
+    root {{ nginx_static_root }};
+    index index.html;
+
+    # ------------------------------------------------------------------
+    # ERROR PAGES
+    #
+    # Same files and same mapping as the previous machine
+    # (files/nginx/nginx-config/404.html and 50x.html).
+    # ------------------------------------------------------------------
+{% for code, page in nginx_error_pages.items() %}
+{% if code == '50x' %}
+    error_page 500 502 503 504 {{ page }};
+{% else %}
+    error_page {{ code }} {{ page }};
+{% endif %}
+{% endfor %}
+
+    location = /404.html {
+        internal;
+    }
+
+    location = /50x.html {
+        internal;
+    }
+
+    # ------------------------------------------------------------------
+    # HEALTH
+    #
+    # /healthz is a static 200 and deliberately touches nothing: it answers
+    # the load balancer's question, "is this VM still serving?". Wired to the
+    # database it would fail every backend at once during a database outage
+    # and take the whole pool out of rotation.
+    #
+    # /readyz proxies one real application, which is the deeper check a
+    # release gate wants.
+    # ------------------------------------------------------------------
+    location = /healthz {
+        access_log off;
+        add_header Content-Type text/plain;
+        return 200 "ok\n";
+    }
+
+{% set readyz = readyz_app | default((applications.keys() | list) | first) %}
+    # Proxied WITH the app's own prefix, because that is the base path it was
+    # built against. Any HTTP answer proves the process is alive; the status
+    # code is the caller's to interpret.
+    location = /readyz {
+        access_log off;
+        proxy_pass http://{{ readyz }}_up{{ readyz_path | default(applications[readyz].path) }};
+        proxy_connect_timeout 2s;
+        proxy_read_timeout 5s;
+    }
+
+{% for name, app in applications.items() %}
+{% set t = app_nginx_tiers[app.tier] %}
+    # ---------------- {{ name }} — {{ app.description | default('') }}
+    # tier {{ app.tier }}, Kestrel on 127.0.0.1:{{ app.port }}
+    # ^~ is load-bearing: without it the static-asset regex location below
+    # wins over this prefix, and {{ app.path }}/anything.js or .png would be
+    # served off the document root as a 404 instead of reaching the app.
+    location ^~ {{ app.path }} {
+        client_max_body_size {{ t.client_max_body_size }};
+
+        # No trailing slash and no rewrite: the prefix reaches Kestrel intact,
+        # because the app builds absolute URLs from it (see UrlApis in
+        # appsettings). Stripping it here would break every redirect it issues.
+        proxy_pass http://{{ name }}_up;
+        proxy_http_version 1.1;
+
+        # $connection_upgrade is "" for a normal request, which is what
+        # enables upstream keepalive, and "upgrade" for a WebSocket.
+        proxy_set_header Connection        $connection_upgrade;
+        proxy_set_header Upgrade           $http_upgrade;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $forwarded_proto;
+        proxy_set_header X-Forwarded-Host  $host;
+        proxy_set_header X-Request-Id      $request_id;
+
+        proxy_cache_bypass $http_upgrade;
+
+        proxy_connect_timeout {{ t.connect_timeout }};
+        proxy_send_timeout    {{ t.send_timeout }};
+        proxy_read_timeout    {{ t.read_timeout }};
+
+        # non_idempotent is deliberately absent: retrying a POST that already
+        # reached Kestrel would duplicate a sale or a payment.
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+        proxy_next_upstream_tries 2;
+        proxy_next_upstream_timeout {{ t.connect_timeout }};
+    }
+
+{% endfor %}
+{% for name, site in static_sites.items() %}
+{% if site.path != '/' %}
+    # ---------------- {{ name }} (static)
+    location {{ site.path }} {
+{% if site.spa | default(false) %}
+        # A client-side route has no file behind it. Without try_files a
+        # reload on /app/#/pedidos returns 404 instead of the shell.
+        try_files $uri $uri/ {{ site.index }};
+{% endif %}
+    }
+
+{% endif %}
+{% endfor %}
+    # Cache-busted bundle assets. `immutable` stops the conditional request
+    # that a plain long max-age still produces on every reload.
+    # `expires` would emit its own Cache-Control on top of this one and the
+    # response would carry the header twice, with the weaker value first.
+    location ~* \.(?:js|css|woff2?|ttf|otf|eot|svg|png|jpg|jpeg|gif|ico|wasm)$ {
+        add_header Cache-Control "public, max-age=2592000, immutable";
+        access_log off;
+    }
+
+{% set root_site = static_sites.root | default(none) %}
+    location / {
+{% if root_site and root_site.spa | default(false) %}
+        try_files $uri $uri/ {{ root_site.index }};
+{% else %}
+        try_files $uri $uri/ =404;
+{% endif %}
+    }
+}

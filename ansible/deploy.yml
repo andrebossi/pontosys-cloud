@@ -1,26 +1,113 @@
 ---
-# Executado na VM de monitoramento, que usa a própria identidade (instance
-# principal) — nenhuma credencial é distribuída.
+# Application releases, and the image/canary drivers.
+#
+#   # rc: newest artifacts in the bucket, and record what landed
+#   ansible-playbook deploy.yml -l env_rc
+#
+#   # prod: exactly what the manifest pins (promotion put it there)
+#   ansible-playbook deploy.yml -l env_prod
+#
+#   # one app
+#   ansible-playbook deploy.yml -l env_rc -e "deploy_apps=['pixapi']"
+#
+#   # rollback: re-deploy an older manifest
+#   ansible-playbook deploy.yml -l env_rc -e app_manifest=2026.09.10-2 \
+#                               -e app_version_source=manifest
+#
+#   # straight from GitHub, no CI round trip
+#   ansible-playbook deploy.yml -l 10.20.16.9 -e app_artifact_source=github \
+#                               -e app_version=2026.09.12-1
 #
 #   ansible-playbook deploy.yml -e image_action=release
-#   ansible-playbook deploy.yml -e canary_action=up
 #   ansible-playbook deploy.yml -e canary_action=shift -e canary_percent=25
-#   ansible-playbook deploy.yml -e canary_action=promote
-#   ansible-playbook deploy.yml -e image_action=prune
-- name: Imagem
+
+# The `release` driver lives on the monitoring VM: it needs OCI credentials,
+# and the instance principal means there is no key on disk. Everything below
+# reaches it through delegate_to.
+- name: Release driver
   hosts: role_monitoring
   become: true
-  gather_facts: true
+  tags: [release, always]
+  roles:
+    - role: app_release
+      when: image_action is not defined and canary_action is not defined
+
+# Resolved for the whole fleet before any machine is touched, and NOT inside
+# the serial play below: with `serial: 1` every batch is its own play, so a
+# version source of `latest` would be re-resolved per machine and a publish
+# landing mid-rollout would split the pool across two versions.
+- name: Resolve the release
+  hosts: role_app
+  become: true
+  tags: [release]
+  tasks:
+    - name: Versions
+      ansible.builtin.include_role:
+        name: app_deploy
+        tasks_from: resolve.yml
+      when: image_action is not defined and canary_action is not defined
+
+- name: Install it
+  hosts: role_app
+  become: true
+  # One VM at a time: the others keep serving while this one restarts, and a
+  # bad release stops at the first machine instead of all of them.
+  serial: 1
+  tags: [release]
+  roles:
+    - role: app_deploy
+      when: image_action is not defined and canary_action is not defined
+
+# After every machine is healthy, not before. A manifest written up front
+# would claim a release that a failed rollout never actually reached.
+- name: Record what landed
+  hosts: role_app
+  become: true
+  tags: [release]
+  tasks:
+    # delegate_to, not a play against role_monitoring: the facts that describe
+    # this rollout -- which environment, which versions -- live on the app
+    # hosts, and `-l env_rc` has already narrowed them correctly.
+    - name: Publish the manifest
+      ansible.builtin.command:
+        argv:
+          - /usr/local/bin/release
+          - publish
+          - "{{ app_env }}"
+          - --release
+          - "{{ app_release_tag | default('', true) or ansible_date_time.iso8601_basic_short }}"
+          - --apps
+          - "{{ app_versions | dict2items | map(attribute='key')
+                | zip(app_versions.values()) | map('join', '=') | join(',') }}"
+          - --base-commit
+          - "{{ lookup('env', 'GIT_COMMIT') }}"
+      delegate_to: "{{ app_release_host }}"
+      run_once: true
+      register: manifest_published
+      changed_when: true
+      when:
+        - image_action is not defined
+        - canary_action is not defined
+        - app_manifest_write | bool
+
+    - name: What was recorded
+      ansible.builtin.debug:
+        msg: "{{ manifest_published.stdout_lines }}"
+      run_once: true
+      when: manifest_published is not skipped
+
+- name: Image
+  hosts: role_monitoring
+  become: true
+  tags: [image]
   roles:
     - role: app_image
       when: image_action is defined
-  tags: [image]
 
-- name: Canário
+- name: Canary
   hosts: role_monitoring
   become: true
-  gather_facts: true
+  tags: [canary]
   roles:
     - role: app_canary
       when: canary_action is defined
-  tags: [canary]

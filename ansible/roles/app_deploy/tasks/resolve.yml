@@ -1,0 +1,93 @@
+---
+# Version resolution, run ONCE for the whole fleet before any machine is
+# touched. Deliberately not inside the serial deploy play: with `serial: 1`
+# each batch is its own play, and an app_version_source of `latest` would be
+# re-resolved per machine. A publish landing mid-rollout would leave half the
+# pool on one version and half on the next, with nothing to show for it.
+
+# `delegate_to` reaches a host outside the run's --limit perfectly well, but
+# the play that INSTALLS the driver is itself narrowed by that limit. So
+# `deploy.yml -l env_rc` on a fresh monitoring VM would fail here with
+# "No such file or directory" and nothing to act on.
+- name: The release driver is installed on {{ app_release_host }}
+  ansible.builtin.stat:
+    path: /usr/local/bin/release
+  delegate_to: "{{ app_release_host }}"
+  run_once: true
+  register: release_cli
+
+- name: Say so plainly if it is not
+  ansible.builtin.assert:
+    that: release_cli.stat.exists
+    fail_msg: >-
+      /usr/local/bin/release is missing on {{ app_release_host }}.
+      It is installed by the first play of deploy.yml, which a --limit of
+      "{{ ansible_limit | default('(none)') }}" excluded. Run it once:
+      ansible-playbook release.yml
+    quiet: true
+  run_once: true
+
+- name: The environment this host belongs to
+  ansible.builtin.set_fact:
+    # From the pscloud.environment defined tag, via the inventory's env_*
+    # groups -- the same tag Terraform sets and IAM matches on.
+    app_env: "{{ (group_names | select('match', '^env_') | first | default('env_prod'))
+                 | regex_replace('^env_', '') }}"
+
+- name: An explicit version was given
+  ansible.builtin.set_fact:
+    app_versions: "{{ dict(deploy_apps | zip([app_version] * (deploy_apps | length))) }}"
+  when: app_version | length > 0
+
+- name: Versions from the {{ app_env }} manifest
+  when:
+    - app_version | length == 0
+    - app_version_source == 'manifest'
+  block:
+    - name: Read it
+      ansible.builtin.command: "/usr/local/bin/release show {{ app_env }} --release {{ app_manifest }} --json"
+      delegate_to: "{{ app_release_host }}"
+      run_once: true
+      register: manifest_json
+      changed_when: false
+
+    - name: Use it
+      ansible.builtin.set_fact:
+        app_versions: "{{ (manifest_json.stdout | from_json).apps }}"
+
+    # A manifest that does not mention an app being deployed is a gap between
+    # the catalog and what CI published, and silently skipping it is how a
+    # machine ends up serving a version nobody chose.
+    - name: Every requested application is pinned
+      ansible.builtin.assert:
+        that: deploy_apps | difference(app_versions.keys() | list) | length == 0
+        fail_msg: >-
+          Manifest {{ app_manifest }} for {{ app_env }} does not pin:
+          {{ deploy_apps | difference(app_versions.keys() | list) | join(', ') }}.
+          Publish them, or narrow the run with -e deploy_apps=[...].
+        quiet: true
+
+- name: Newest version of each application in the bucket
+  when:
+    - app_version | length == 0
+    - app_version_source == 'latest'
+  block:
+    - name: Ask the store
+      ansible.builtin.command: "/usr/local/bin/release latest {{ item }}"
+      delegate_to: "{{ app_release_host }}"
+      run_once: true
+      loop: "{{ deploy_apps }}"
+      register: latest_versions
+      changed_when: false
+
+    - name: Use them
+      ansible.builtin.set_fact:
+        app_versions: >-
+          {{ dict(latest_versions.results | map(attribute='item')
+                  | zip(latest_versions.results | map(attribute='stdout') | map('trim'))) }}
+
+- name: What this run will install
+  ansible.builtin.debug:
+    msg: "{{ app_env }}: {{ app_versions | dict2items | map('join', ' ') | join(', ') }}"
+    verbosity: 0
+  run_once: true

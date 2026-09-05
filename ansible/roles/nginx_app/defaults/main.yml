@@ -1,35 +1,26 @@
 ---
+nginx_listen_port: 80
+nginx_user: nginx
+nginx_worker_processes: auto
+nginx_worker_connections: 4096
+nginx_worker_rlimit_nofile: 65535
+nginx_static_root: /usr/share/nginx/html
 nginx_access_log: /var/log/nginx/access.json.log
 nginx_error_log: /var/log/nginx/error.log
+nginx_error_log_level: warn
 nginx_status_port: 8081
+nginx_large_client_header_buffers: "4 32k"
+nginx_open_file_cache: "max=2000 inactive=60s"
+nginx_gzip: {enabled: false}
+nginx_error_pages: {}
+applications: {}
+static_sites: {}
+app_nginx_tiers: {}
+app_upstream_max_fails: 3
+app_upstream_fail_timeout: 10s
+app_upstream_keepalive: 16
 
-# Timeouts and limits per tier. Reports need minutes; payments need to fail
-# fast instead of holding the connection open.
-app_nginx_tiers:
-  site:
-    connect_timeout: 5s
-    read_timeout: 60s
-    client_max_body_size: 32m
-  api:
-    connect_timeout: 3s
-    read_timeout: 30s
-    client_max_body_size: 8m
-  critical:
-    connect_timeout: 2s
-    read_timeout: 15s
-    client_max_body_size: 2m
-  batch:
-    connect_timeout: 5s
-    read_timeout: 300s
-    client_max_body_size: 64m
-
-# Fields match Fluent Bit's nginx_json parser. `app` is what enables alerting
-# per application; without it the 9 apps collapse into a single metric.
-nginx_json_log_format: >-
-  '{"t":"$time_iso8601","app":"$app_name","remote_addr":"$remote_addr",
-  "method":"$request_method","uri":"$uri","query":"$query_string",
-  "status":"$status","body_bytes":$body_bytes_sent,"request_time":$request_time,
-  "upstream_time":"$upstream_response_time","upstream_addr":"$upstream_addr",
-  "upstream_status":"$upstream_status","host":"$host",
-  "user_agent":"$http_user_agent","xff":"$http_x_forwarded_for",
-  "request_id":"$request_id"}'
+# Whether to publish the static content from files/nginx/nginx-config. Turned
+# off in the golden image: the SPA bundles are ~140 MB and belong in an
+# artifact, not baked into every machine image.
+nginx_deploy_static: true

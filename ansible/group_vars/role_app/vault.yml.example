@@ -1,0 +1,28 @@
+---
+# ===========================================================================
+# SECRETS — copy to vault.yml and encrypt:
+#
+#   cp group_vars/role_app/vault.yml.example group_vars/role_app/vault.yml
+#   ansible-vault encrypt group_vars/role_app/vault.yml
+#   ansible-playbook site.yml --ask-vault-pass
+#
+# vault.yml is gitignored. This example is not, so it holds no real values.
+#
+# NOTE: the appsettings.json files under ansible/files/nginx/nginx-config/ are
+# copies of the old machine and contain LIVE database, SMTP and JWT
+# credentials in git history. Those need rotating; do not paste them here.
+# ===========================================================================
+
+vault_db_global_host: db.example.internal
+vault_db_global_user: glb_user
+vault_db_global_password: CHANGE-ME
+
+vault_db_cep_host: db.example.internal
+vault_db_cep_user: cep_user
+vault_db_cep_password: CHANGE-ME
+
+vault_token_audience: VSAudiencePS
+vault_token_issuer: VSIssuerPS
+
+vault_monitorclientes_token_key: CHANGE-ME
+vault_smtp_password: CHANGE-ME

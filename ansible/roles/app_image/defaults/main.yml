@@ -6,7 +6,7 @@ image_pool: canary
 # vazio + image_latest=true pega a mais recente construída pelo Packer
 image_id: ""
 image_latest: true
-image_keep: 3
+image_keep: 5
 image_min_age_seconds: 7200
 
 image_venv: /opt/pscloud/venv

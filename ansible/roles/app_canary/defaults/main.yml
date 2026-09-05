@@ -1,8 +1,31 @@
 ---
-# status | up | shift | promote | abort
+# status | up | shift | gate | promote | abort
 canary_action: status
 canary_percent: 0
 canary_size: 1
 
-canary_backend_port: 8080
+# The port the load balancer's backends are registered on -- nginx's listener,
+# `app_port` in infra/live/<env>/env.hcl. Not 8080: this is what the script
+# matches backends by, and a wrong value makes it find no canary at all.
+canary_backend_port: 80
 canary_venv: /opt/pscloud/venv
+
+# ---------------------------------------------------------------------------
+# GATE
+#
+# What has to be true before a ramp continues. Read from VictoriaMetrics, so
+# the questions are about what the applications ANSWERED, not about whether
+# the backend is reachable.
+# ---------------------------------------------------------------------------
+canary_metrics_url: http://127.0.0.1:8428
+canary_gate_window: 10m
+# Too little traffic is not a pass. A canary that served nine requests proves
+# nothing, and reading "no errors seen" as success is how a broken release
+# gets promoted at 3am.
+canary_gate_min_requests: 200
+# Absolute ceiling.
+canary_gate_max_error_rate: 0.02
+# And relative to stable: a release is only bad if it is worse than what it
+# replaces. A 4% baseline on both sides is a pre-existing problem.
+canary_gate_max_error_delta: 0.01
+canary_gate_max_latency_ratio: 1.5

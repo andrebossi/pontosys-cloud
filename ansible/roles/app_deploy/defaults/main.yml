@@ -1,0 +1,52 @@
+---
+# Which applications this run touches. Defaults to the whole catalog; one app
+# is `-e "deploy_apps=['pixapi']"`.
+deploy_apps: "{{ applications.keys() | list }}"
+
+# bucket | github
+#
+# bucket is the normal path: CI mirrors a GitHub release into OCI Object
+# Storage, and machines pull from there. github is kept for a hotfix or a
+# scratch VM, when going through CI is not worth it.
+app_artifact_source: bucket
+
+# How each app's version is chosen. Set per environment in group_vars/env_*.
+#   latest    newest artifact in the bucket -- rc chases the tip
+#   manifest  exactly what the environment's manifest pins -- prod deploys
+#             what rc validated, never a fresh resolution of "latest"
+app_version_source: latest
+
+# Deploy a named historical manifest instead of `current`. This is the
+# rollback: -e app_manifest=2026.09.10-2
+app_manifest: current
+
+# Overrides everything, for every app in deploy_apps.
+app_version: ""
+
+# Record what landed, as manifests/<env>/<release>.json plus current.json.
+app_manifest_write: false
+app_release_tag: ""
+
+# Where the `release` driver runs: it needs OCI credentials, which the
+# monitoring VM has through its instance principal. Falls back to the control
+# node, which is the case during a Packer build -- there is no monitoring VM
+# in that inventory and the runner already holds OCI credentials.
+app_release_host: "{{ groups['role_monitoring'] | first | default('localhost') }}"
+
+# Lifetime of the per-object download URL. Long enough for a slow unpack on a
+# 1 OCPU box, short enough that a leaked line in a log is worthless by the
+# time anyone reads it.
+app_par_ttl: 900
+
+# True during a Packer build: the artifact is unpacked and `current` is
+# switched, but nothing is started or health-checked -- there is no live
+# service on a builder, and the unit comes up on the first boot of a real
+# instance.
+app_bake: false
+
+app_deploy_root: /srv/apps
+app_deploy_user: dotnetapp
+app_releases_keep: 5
+app_deploy_health_path: /
+app_deploy_health_retries: 12
+app_deploy_health_delay: 5

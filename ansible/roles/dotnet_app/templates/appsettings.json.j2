@@ -1,0 +1,5 @@
+{#
+  Non-secret settings only. Merged common + per-app, then rendered as JSON so
+  a typo is a YAML error at template time rather than a runtime surprise.
+#}
+{{ (app_settings_common | combine(app_settings[item.key] | default({}), recursive=True)) | to_nice_json }}

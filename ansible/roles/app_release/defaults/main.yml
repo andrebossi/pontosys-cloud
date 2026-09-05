@@ -1,0 +1,14 @@
+---
+# show | list | promote | publish | rollback | none
+#
+# `none` installs the driver and stops -- that is how deploy.yml and image.yml
+# make sure `release` is on the box before they call it.
+release_action: none
+
+release_venv: /opt/pscloud/venv
+
+release_from_env: rc
+release_to_env: prod
+release_tag: ""
+release_apps: ""
+release_base_commit: ""
