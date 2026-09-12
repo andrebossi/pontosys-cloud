@@ -3,12 +3,17 @@ label_prefix: pscloud
 compartment_ocid: "{{ lookup('env', 'OCI_COMPARTMENT_OCID') }}"
 oci_vault_id: "{{ lookup('env', 'OCI_VAULT_OCID') }}"
 oci_vault_key_id: "{{ lookup('env', 'OCI_VAULT_KEY_OCID') }}"
-artifact_bucket: pscloud-artifacts
+# pscloud-releases, created by infra/bootstrap -- a plain private versioned
+# bucket, which is what artifacts want. NOT the platform module's bucket: that
+# one is the backup store (KMS, WORM retention, ARCHIVE lifecycle) and a WORM
+# rule would make pruning an old release impossible.
+# Derived from label_prefix so the name exists in one place.
+artifact_bucket: "{{ label_prefix }}-releases"
 
 timezone: America/Sao_Paulo
 
-# Names in the vault. Database passwords are generated on first use; the rest
-# are created once by hand.
+ansible_managed: "Ansible managed -- edits are overwritten on the next run"
+
 secret_prefix: "{{ label_prefix }}-{{ app_env }}"
 app_env: prod
 
@@ -23,7 +28,4 @@ monitoring_endpoints:
   metrics: { host: "{{ monitoring_host }}", port: 8428, uri: /api/v1/write }
   logs:    { host: "{{ monitoring_host }}", port: 9428, uri: /insert/jsonline }
 
-# _msg_field takes a list and uses the first field present: MESSAGE for
-# journald, uri for the nginx access log. _time_field is `date` because that is
-# the key Fluent Bit writes with json_date_format: iso8601.
 vl_query: "_msg_field=MESSAGE,uri,log,msg&_time_field=date"

@@ -15,7 +15,7 @@
 applications:
 
   virtualstore:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Virtual Store — vendas
     dll: VirtualStore.Vendas.Service.Api.dll
     port: 5000
@@ -27,7 +27,7 @@ applications:
       CepContext: cep
 
   monitorclientesapi:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Monitor de clientes — global directory
     dll: MonitorClientes.Monitoramento.WebApi.dll
     port: 5002
@@ -37,7 +37,7 @@ applications:
       MonitoramentoContext: global
 
   dashsapi:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Dashboards
     dll: VirtualStore.Dashboards.Api.dll
     port: 5003
@@ -46,7 +46,7 @@ applications:
     connections: {}
 
   relatoriosapi:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Relatórios (NFe/NFCe rendering)
     dll: VirtualStore.Relatorios.Api.dll
     port: 5004
@@ -56,7 +56,7 @@ applications:
     connections: {}
 
   geradorrelatoriosapi:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Gerador de relatórios
     dll: MonitorClientes.Relatorio.WebApi.dll
     port: 5005
@@ -66,7 +66,7 @@ applications:
       RelatoriosContext: global
 
   cadastrosapi:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Cadastros
     dll: VirtualStore.Cadastros.Api.dll
     port: 5006
@@ -77,7 +77,7 @@ applications:
       CepContext: cep
 
   entradaapi:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Entradas de mercadoria
     dll: VirtualStore.Entradas.API.dll
     port: 5007
@@ -88,7 +88,7 @@ applications:
       CepContext: cep
 
   pixapi:
-    version: "2026.09.06"
+    version: "2026.09.12"
     description: Integração PIX
     dll: VirtualStore.Integrations.Pix.Api.dll
     port: 5008
@@ -98,7 +98,7 @@ applications:
     connections: {}
 
 # The three frontends in one tarball, unpacked over the document root.
-webroot_version: "2026.09.06"
+webroot_version: "2026.09.12"
 
 # nginx location -> index. spa: false is deliberate -- try_files would answer
 # every unknown path with the shell and a 200, and the error page would never

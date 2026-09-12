@@ -7,9 +7,9 @@
     name: docker
     types: [deb]
     uris: "https://download.docker.com/linux/ubuntu"
-    suites: "{{ ansible_distribution_release }}"
+    suites: "{{ ansible_facts['distribution_release'] }}"
     components: [stable]
-    architectures: ["{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_architecture] }}"]
+    architectures: ["{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"]
     signed_by: https://download.docker.com/linux/ubuntu/gpg
     state: present
 

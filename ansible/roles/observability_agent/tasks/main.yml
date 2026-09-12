@@ -3,8 +3,8 @@
   ansible.builtin.deb822_repository:
     name: fluent-bit
     types: [deb]
-    uris: "https://packages.fluentbit.io/ubuntu/{{ ansible_distribution_release }}"
-    suites: "{{ ansible_distribution_release }}"
+    uris: "https://packages.fluentbit.io/ubuntu/{{ ansible_facts['distribution_release'] }}"
+    suites: "{{ ansible_facts['distribution_release'] }}"
     components: [main]
     signed_by: https://packages.fluentbit.io/fluentbit.key
     state: present

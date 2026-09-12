@@ -1,16 +1,11 @@
 ---
-# VMs on a workstation. They pull the same artifacts from the same bucket and
-# read the same vault; the only difference is that they have no instance
-# principal, so they get the API key.
 app_env: local
 oci_config_dir: "{{ lookup('env', 'HOME') }}/.oci"
 
-# Smaller VMs than the OCI shape.
 host_vcpus: 2
 host_memory_mb: 4096
 apps_slice_reserve_mb: 1200
 
-# A MySQL container on the workstation is not on 10.20.0.0/16.
 db_host: "{{ lookup('env', 'PSCLOUD_DB_HOST') }}"
 db_user_host: "%"
 db_create_schemas: true

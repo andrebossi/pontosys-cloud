@@ -5,7 +5,7 @@
     fail_msg: >-
       The container limits add up to {{ container_mb }} MB, over the
       {{ monitoring_mem_budget_mb }} MB allocated to the monitoring stack on a
-      {{ (ansible_memtotal_mb / 1024) | round(1) }} GB machine that also runs
+      {{ (ansible_facts['memtotal_mb'] / 1024) | round(1) }} GB machine that also runs
       other things. Lower a limit or raise monitoring_mem_budget_mb.
     success_msg: "{{ container_mb }} MB of {{ monitoring_mem_budget_mb }} MB allocated"
     quiet: true

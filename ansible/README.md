@@ -40,7 +40,7 @@ applications:
     linked_dirs: [Contents]
     connections: {}
 
-webroot_version: "2026.09.06"
+webroot_version: "2026.09.12"
 ```
 
 Releasing is: CI uploads a tarball, someone bumps the number, the rollout runs.
@@ -77,7 +77,7 @@ unpacked over the document root.
 `scripts/package.sh` builds all of it from the old machine's document root:
 
 ```sh
-scripts/package.sh files/nginx-config 2026.09.06
+scripts/package.sh files/nginx-config 2026.09.12
 for f in out/*/*.tar.gz; do
   n=$(basename "$(dirname "$f")"); v=$(basename "$f" .tar.gz); v=${v#"$n"-}
   pscloud push "$n" "$v" "$f"

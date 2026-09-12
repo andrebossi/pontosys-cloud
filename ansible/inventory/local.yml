@@ -1,17 +1,23 @@
 ---
 all:
   vars:
-    ansible_user: ubuntu
+    ansible_user: vagrant
     ansible_python_interpreter: /usr/bin/python3
+    ansible_ssh_private_key_file: >-
+      {{ inventory_dir }}/../../resources/vagrant/.vagrant/machines/default/libvirt/private_key
+    ansible_ssh_common_args: >-
+      -o IdentitiesOnly=yes
+      -o StrictHostKeyChecking=no
+      -o UserKnownHostsFile=/dev/null
 
   children:
     role_app:
       hosts:
-        192.168.122.11:
+        192.168.121.97:
 
     role_monitoring:
       hosts:
-        192.168.122.10:
+        192.168.121.97:
 
     env_local:
       children:

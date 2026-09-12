@@ -50,11 +50,16 @@ terragrunt-debug.tfvars.json
 
 # End of https://www.toptal.com/developers/gitignore/api/terraform,terragrunt,ansible
 
-keys/*
+# ------
+
+# Data
 !infra/bootstrap/*.tfvars
 !infra/bootstrap/*.tfstate
+resources/vagrant/.vagrant
+data/*
+
 ### Ansible secrets ###
 ansible/group_vars/**/vault.yml
 ansible/host_vars/**/vault.yml
-data/*
-resources/vagrant/.vagrant
+ansible/collections
+ansible/roles/robertdebock.fail2ban

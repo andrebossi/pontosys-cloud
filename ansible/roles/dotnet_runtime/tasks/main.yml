@@ -22,7 +22,7 @@
 # globalization on every app at once.
 - name: Host ICU version
   ansible.builtin.shell:
-    cmd: ls /usr/lib/{{ ansible_architecture }}-linux-gnu/libicuuc.so.* | sed -E 's/.*so\.([0-9]+).*/\1/' | sort -rn | head -1
+    cmd: ls /usr/lib/{{ ansible_facts['architecture'] }}-linux-gnu/libicuuc.so.* | sed -E 's/.*so\.([0-9]+).*/\1/' | sort -rn | head -1
   register: host_icu
   changed_when: false
 
@@ -93,7 +93,10 @@
 # fc-match always answers, so the answer is what matters: a family that is not
 # installed resolves to DejaVu and every report renders with the wrong metrics.
 - name: Fonts resolve to the installed files
-  ansible.builtin.command: "fc-match --format=%{file} {{ item }}"
+  # argv, not a string: `command` splits a string on whitespace, so the family
+  # "Orator10 BT" arrived as two patterns and fc-match answered with nothing.
+  ansible.builtin.command:
+    argv: [fc-match, "--format=%{file}", "{{ item }}"]
   loop: [Arial, Tahoma, "Orator10 BT"]
   register: fc
   changed_when: false

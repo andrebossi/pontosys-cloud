@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Package the old document root into the tarballs the bucket expects.
 #
-#   scripts/package.sh data/nginx-config 2026.09.06
+#   scripts/package.sh data/nginx-config 2026.09.12
 #
 # Produces, under out/:
 #   <app>/<app>-<version>.tar.gz          eight .NET publish trees

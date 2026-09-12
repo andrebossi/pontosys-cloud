@@ -17,8 +17,8 @@ dotnet_compat_dir: /opt/dotnet/compat
 dotnet_fonts_dir: /usr/local/share/fonts/msttcore
 
 # x86_64 in OCI, aarch64 on a local test VM.
-dotnet_arch: "{{ {'x86_64': 'x64', 'aarch64': 'arm64'}[ansible_architecture] }}"
-deb_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_architecture] }}"
+dotnet_arch: "{{ {'x86_64': 'x64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+deb_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
 
 # .NET 5 dlopens libssl.so.1.1 and Ubuntu 24.04 ships OpenSSL 3 only. The .deb
 # is unpacked into a private directory, never installed: apt install libssl1.1
