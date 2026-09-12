@@ -15,7 +15,7 @@ image.yml        the golden image, run by Packer
 |---|---|
 | `base` | accounts and sudo, sysctl, swap, journald, firewall, OCI identity |
 | `pscloud` | the `pscloud` CLI: artifacts out of the bucket, secrets out of the vault |
-| `dotnet_runtime` | the .NET 5 runtime, OpenSSL 1.1, libgdiplus, the report fonts |
+| `dotnet_runtime` | the .NET 5 and 2.1 runtimes, OpenSSL 1.1, libgdiplus, the report fonts |
 | `dotnet_app` | the systemd slice, unit template, drop-ins, settings, env templates |
 | `app_deploy` | fetch a version, switch, health-check, roll back |
 | `nginx_app` | nginx, routing, error pages, the web root |
@@ -312,14 +312,23 @@ definition to keep in step, and it would only run on first boot.
   ships. This is the one thing cloud-init did that had to move somewhere.
 
 The application VMs are x86_64 and the monitoring machine is arm64, so the
-runtime tarball, the OpenSSL `.deb` (amd64 on `security.ubuntu.com`, arm64 on
+runtime tarballs, the OpenSSL `.deb` (amd64 on `security.ubuntu.com`, arm64 on
 `ports.ubuntu.com` — separate archives) and the Docker apt repository all derive
 from `ansible_architecture`.
 
 ## Runtime
 
-Every application targets `Microsoft.AspNetCore.App 5.0.0`, so there is one
-runtime at `/opt/dotnet` and no per-application selection.
+Runtimes only, no SDK. `dotnet_versions` installs `Microsoft.AspNetCore.App`
+2.1.30 and 5.0.15 side by side under `/opt/dotnet`; an application resolves the
+framework it was built against by itself, so there is no per-application
+selection. The list is unpacked oldest first on purpose: each bundle carries its
+own muxer and `host/fxr`, and `dotnet` loads the highest `hostfxr` it finds —
+the only one able to start both.
+
+An aarch64 host gets 5.0 alone. Microsoft never published
+`aspnetcore-runtime-2.1.30-linux-arm64` — 2.1 shipped `linux-x64` and
+`linux-arm` only — so `dotnet_versions` drops 2.1.30 off x64 rather than 404 in
+the middle of a play. The application VMs are x86_64 and get both.
 
 - **OpenSSL 1.1 is unpacked, not installed.** .NET 5 `dlopen`s
   `libssl.so.1.1`, which Ubuntu 24.04 does not ship. The `.deb` is extracted to
@@ -328,7 +337,10 @@ runtime at `/opt/dotnet` and no per-application selection.
   search path of every process, sshd included.
 - **ICU is handed over explicitly.** .NET 5 probes `libicuuc.so` up to 67 and
   Ubuntu 24.04 ships 74, so `CLR_ICU_VERSION_OVERRIDE` is set from the detected
-  version.
+  version. That knob arrived in .NET Core 3.0, so a 2.1 application ignores it
+  and finds no ICU it recognises: globalization for anything actually deployed
+  on 2.1 has to be settled separately — invariant mode, or an old `libicu`
+  staged the way OpenSSL is. Nothing in `applications.yml` targets 2.1 today.
 - **Workstation GC.** `COMPlus_gcServer=0`: server GC allocates a heap and a
   thread per core per process, and eight processes on two cores would mean
   sixteen heaps competing for 4.4 GB. The `COMPlus_` prefix is deliberate —

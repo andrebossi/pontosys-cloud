@@ -7,16 +7,14 @@
 - name: Application servers
   hosts: role_app
   become: true
-  # One at a time: the pool is behind a load balancer and a simultaneous nginx
-  # reload on every backend is a visible outage.
   serial: 1
   roles:
-    - { role: base,                tags: [base] }
-    - { role: pscloud,             tags: [cli] }
-    - { role: dotnet_runtime,      tags: [runtime] }
-    - { role: nginx_app,           tags: [nginx] }
-    - { role: dotnet_app,          tags: [apps] }
-    - { role: app_deploy,          tags: [apps, deploy] }
+    - { role: base, tags: [base] }
+    - { role: pscloud, tags: [cli] }
+    - { role: dotnet_runtime, tags: [runtime] }
+    - { role: nginx_app, tags: [nginx] }
+    - { role: dotnet_app, tags: [apps] }
+    - { role: app_deploy, tags: [apps, deploy] }
     - { role: observability_agent, tags: [agent] }
 
 - name: Database accounts
@@ -25,7 +23,5 @@
   gather_facts: false
   tags: [db]
   tasks:
-    # Server-side, so one machine is enough -- and it has to be an application
-    # VM: the NSG only lets the app tier reach 3306.
     - ansible.builtin.include_role: { name: db_users }
       run_once: true

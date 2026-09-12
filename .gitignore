@@ -57,3 +57,4 @@ keys/*
 ansible/group_vars/**/vault.yml
 ansible/host_vars/**/vault.yml
 data/*
+resources/vagrant/.vagrant

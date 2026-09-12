@@ -1,8 +1,4 @@
 ---
-# The monitoring server: an existing machine that also runs RustDesk. It gets
-# the observability backend and nothing from the application layer.
-#
-# It is also the Ansible executor, on the local network and in the cloud.
 - name: Monitoring server
   hosts: role_monitoring
   become: true

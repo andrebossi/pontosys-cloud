@@ -1,6 +1,17 @@
 ---
-# Every application in the catalog targets Microsoft.AspNetCore.App 5.0.0.
-dotnet_version: "5.0.15"
+# Runtimes only -- no SDK on an application server. Both frameworks live side
+# by side under dotnet_root, so an application picks the one it was built
+# against without anything else on the machine changing.
+#
+# Ascending order, and it matters: every bundle carries its own copy of the
+# muxer and of host/fxr, so the newest has to be unpacked last for `dotnet` to
+# be able to start both.
+#
+# arm64 gets 5.0 alone. There is no aspnetcore-runtime-2.1.30-linux-arm64:
+# 2.1 shipped linux-x64 and linux-arm only, and the download 404s. The
+# application VMs are x86_64 and get both; an aarch64 test VM cannot.
+dotnet_versions: "{{ ['2.1.30', '5.0.15'] if dotnet_arch == 'x64' else ['5.0.15'] }}"
+
 dotnet_root: /opt/dotnet
 dotnet_compat_dir: /opt/dotnet/compat
 dotnet_fonts_dir: /usr/local/share/fonts/msttcore

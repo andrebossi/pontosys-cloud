@@ -1,10 +1,4 @@
 ---
-# The golden image, built by Packer against a throwaway instance.
-#
-# It comes out complete -- runtime, fonts, nginx, the frontends, the units, the
-# agent and the applications at the versions in applications.yml -- and carries
-# no credential: the env files are @@secret@@ templates that pscloud-env.service
-# resolves on first boot with the instance's own principal.
 - name: Golden image
   hosts: default
   become: true

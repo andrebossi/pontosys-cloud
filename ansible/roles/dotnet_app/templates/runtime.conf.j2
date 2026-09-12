@@ -9,6 +9,7 @@ Environment=DOTNET_ROOT={{ dotnet_root }}
 # OpenSSL 1.1, staged privately rather than installed system-wide.
 Environment=LD_LIBRARY_PATH={{ dotnet_compat_dir }}/lib
 # .NET 5 only probes libicuuc.so up to 67; this host has {{ dotnet_host_icu_version }}.
+# A 2.1 application ignores this -- the variable arrived in .NET Core 3.0.
 Environment=CLR_ICU_VERSION_OVERRIDE={{ dotnet_host_icu_version }}
 {% for k, v in dotnet_runtime_env.items() %}
 Environment={{ k }}={{ v }}

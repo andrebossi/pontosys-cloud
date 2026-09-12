@@ -53,21 +53,28 @@
     state: directory
     mode: "0755"
 
-- name: ASP.NET Core runtime
+# Unpacked in the order they are listed, oldest first: the bundles overlap in
+# the muxer and in host/fxr, and `dotnet` loads the highest hostfxr it finds,
+# which is the one that can start both frameworks.
+- name: ASP.NET Core runtimes
   ansible.builtin.unarchive:
-    src: "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/{{ dotnet_version }}/aspnetcore-runtime-{{ dotnet_version }}-linux-{{ dotnet_arch }}.tar.gz"
+    src: "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/{{ item }}/aspnetcore-runtime-{{ item }}-linux-{{ dotnet_arch }}.tar.gz"
     dest: "{{ dotnet_root }}"
     remote_src: true
     extra_opts: [--no-same-owner]
-    creates: "{{ dotnet_root }}/shared/Microsoft.AspNetCore.App/{{ dotnet_version }}"
+    creates: "{{ dotnet_root }}/shared/Microsoft.AspNetCore.App/{{ item }}"
+  loop: "{{ dotnet_versions }}"
 
-- name: The runtime starts
+- name: Every runtime starts
   ansible.builtin.command: "{{ dotnet_root }}/dotnet --list-runtimes"
   environment:
     LD_LIBRARY_PATH: "{{ dotnet_compat_dir }}/lib"
   register: dotnet_runtimes_out
   changed_when: false
-  failed_when: "'Microsoft.AspNetCore.App ' ~ dotnet_version not in dotnet_runtimes_out.stdout"
+  failed_when: dotnet_versions
+               | map('regex_replace', '^', 'Microsoft.AspNetCore.App ')
+               | reject('in', dotnet_runtimes_out.stdout)
+               | list | length > 0
 
 # Report layouts reference Arial, Tahoma and Orator by name. Missing, libgdiplus
 # substitutes a default face and invoices come out with the wrong column widths.
