@@ -23,13 +23,9 @@ base_open_ports: []
 # See tasks/users.yml for what each one is for. Public keys go in
 # group_vars or host_vars -- they are not secrets, but they are site-specific.
 # ---------------------------------------------------------------------------
-app_deploy_user: dotnetapp
-app_deploy_root: /srv/apps
-
 base_users:
   deploy:
     comment: Deployment automation
-    groups: [dotnetapp]
     sudo: ["ALL"]
     ssh_keys: []
 

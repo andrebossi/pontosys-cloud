@@ -1,0 +1,36 @@
+name: publish artifact
+
+# What an application repository calls after `dotnet publish`. Uploads one
+# tarball to the bucket; nothing is deployed until a person bumps the version in
+# group_vars/role_app/applications.yml.
+#
+# Called from another repository with:
+#   uses: pontosys/pscloud/.github/workflows/publish.yml@main
+#   with: { name: pixapi, version: 2026.09.12, path: ./out }
+
+on:
+  workflow_call:
+    inputs:
+      name:    { required: true, type: string }
+      version: { required: true, type: string }
+      path:    { required: true, type: string, description: the dotnet publish directory }
+
+env:
+  OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
+
+jobs:
+  publish:
+    runs-on: [self-hosted, pscloud-monitoring]
+    steps:
+      - name: Pack from inside the publish directory
+        run: tar -C "${{ inputs.path }}" -czf /tmp/artifact.tar.gz .
+
+      - name: Upload
+        run: pscloud push "${{ inputs.name }}" "${{ inputs.version }}" /tmp/artifact.tar.gz
+
+      - name: Next step
+        run: |
+          {
+            echo "Uploaded \`${{ inputs.name }} ${{ inputs.version }}\`."
+            echo "Set it in \`ansible/group_vars/role_app/applications.yml\` and run the rollout."
+          } >> "$GITHUB_STEP_SUMMARY"

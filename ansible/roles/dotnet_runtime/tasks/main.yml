@@ -1,47 +1,93 @@
 ---
-- name: Native dependencies
+- name: Runtime dependencies
   ansible.builtin.apt:
     name:
       - ca-certificates
-      - libc6
-      - libgcc-s1
+      - libicu74
       - libgssapi-krb5-2
       - libstdc++6
       - zlib1g
-      - libicu74
+      # System.Drawing.Common on Linux wraps libgdiplus, which is not a managed
+      # dependency: it is absent until installed, and only a rendered report
+      # notices.
+      - libgdiplus
+      - libc6-dev
+      - fontconfig
     state: present
     update_cache: true
     cache_valid_time: 3600
 
-# These runtimes probe libicuuc.so.<n> from 67 downwards and Ubuntu 24.04 ships
-# 74, so the version has to be handed over explicitly. Detected rather than
-# hardcoded, so a distribution upgrade does not silently break globalization on
-# every app at once.
+# .NET 5 probes libicuuc.so up to 67 and Ubuntu 24.04 ships 74, so the version
+# is handed over explicitly. Detected, so a distribution upgrade does not break
+# globalization on every app at once.
 - name: Host ICU version
   ansible.builtin.shell:
-    cmd: >-
-      set -o pipefail;
-      ls /usr/lib/{{ ansible_architecture }}-linux-gnu/libicuuc.so.* 2>/dev/null
-      | sed -E 's/.*libicuuc\.so\.([0-9]+).*/\1/' | sort -rn | head -1
-    executable: /bin/bash
+    cmd: ls /usr/lib/{{ ansible_architecture }}-linux-gnu/libicuuc.so.* | sed -E 's/.*so\.([0-9]+).*/\1/' | sort -rn | head -1
   register: host_icu
   changed_when: false
-  failed_when: host_icu.stdout | trim == ""
 
-- name: ICU version is a fact for the unit drop-ins
+- name: ICU version for the unit drop-ins
   ansible.builtin.set_fact:
     dotnet_host_icu_version: "{{ host_icu.stdout | trim }}"
 
-- name: OpenSSL 1.1, private to the app units
-  ansible.builtin.include_tasks: compat.yml
+- name: OpenSSL 1.1 package
+  ansible.builtin.get_url:
+    url: "{{ libssl_url }}"
+    dest: /var/cache/libssl1.1.deb
+    mode: "0644"
+  register: libssl_deb
 
-- name: Runtimes
-  ansible.builtin.include_tasks: runtime.yml
-  loop: "{{ dotnet_runtimes | dict2items }}"
-  loop_control:
-    loop_var: rt
-    label: "{{ rt.key }} -> {{ rt.value.version }}"
+- name: Unpack it, private to the app units
+  ansible.builtin.shell:
+    cmd: |
+      set -e
+      rm -rf /tmp/libssl && mkdir -p /tmp/libssl {{ dotnet_compat_dir }}/lib
+      dpkg-deb -x /var/cache/libssl1.1.deb /tmp/libssl
+      find /tmp/libssl -name 'lib*.so.1.1' -exec cp -a {} {{ dotnet_compat_dir }}/lib/ \;
+      rm -rf /tmp/libssl
+    creates: "{{ dotnet_compat_dir }}/lib/libssl.so.1.1"
 
-- name: System.Drawing support
-  ansible.builtin.include_tasks: drawing.yml
-  when: dotnet_install_drawing | bool
+- name: Install root
+  ansible.builtin.file:
+    path: "{{ dotnet_root }}"
+    state: directory
+    mode: "0755"
+
+- name: ASP.NET Core runtime
+  ansible.builtin.unarchive:
+    src: "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/{{ dotnet_version }}/aspnetcore-runtime-{{ dotnet_version }}-linux-{{ dotnet_arch }}.tar.gz"
+    dest: "{{ dotnet_root }}"
+    remote_src: true
+    extra_opts: [--no-same-owner]
+    creates: "{{ dotnet_root }}/shared/Microsoft.AspNetCore.App/{{ dotnet_version }}"
+
+- name: The runtime starts
+  ansible.builtin.command: "{{ dotnet_root }}/dotnet --list-runtimes"
+  environment:
+    LD_LIBRARY_PATH: "{{ dotnet_compat_dir }}/lib"
+  register: dotnet_runtimes_out
+  changed_when: false
+  failed_when: "'Microsoft.AspNetCore.App ' ~ dotnet_version not in dotnet_runtimes_out.stdout"
+
+# Report layouts reference Arial, Tahoma and Orator by name. Missing, libgdiplus
+# substitutes a default face and invoices come out with the wrong column widths.
+- name: Fonts
+  ansible.builtin.copy:
+    src: fonts/
+    dest: "{{ dotnet_fonts_dir }}/"
+    mode: "0644"
+  register: fonts
+
+- name: Font cache
+  ansible.builtin.command: "fc-cache -f {{ dotnet_fonts_dir }}"
+  when: fonts is changed
+  changed_when: true
+
+# fc-match always answers, so the answer is what matters: a family that is not
+# installed resolves to DejaVu and every report renders with the wrong metrics.
+- name: Fonts resolve to the installed files
+  ansible.builtin.command: "fc-match --format=%{file} {{ item }}"
+  loop: [Arial, Tahoma, "Orator10 BT"]
+  register: fc
+  changed_when: false
+  failed_when: not fc.stdout.startswith(dotnet_fonts_dir)

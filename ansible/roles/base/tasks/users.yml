@@ -2,7 +2,6 @@
 # Three accounts, three jobs. Nothing logs in as root and nothing runs an
 # application as a human.
 #
-#   dotnetapp  runs the applications. nologin, no sudo, owns /srv/apps.
 #   deploy     the automation identity. Ansible connects as this.
 #   ops        humans, for looking at a machine that is misbehaving.
 #
@@ -12,15 +11,6 @@
 # its own audit trail -- not a shared login. `ops` is where the restriction is
 # real: its allowlist is short enough to read, and most of what it needs is
 # group membership rather than sudo at all.
-
-- name: Service account for the applications
-  ansible.builtin.user:
-    name: "{{ app_deploy_user }}"
-    system: true
-    shell: /usr/sbin/nologin
-    home: "{{ app_deploy_root }}"
-    create_home: false
-    password_lock: true
 
 - name: Operational accounts
   ansible.builtin.user:
@@ -66,15 +56,3 @@
     label: "{{ item.key }}"
   when: item.value.sudo | default([]) | length > 0
 
-# ops reads the app trees to check what a release actually contains, and reads
-# nothing else it does not already own.
-- name: ops can read the application trees
-  ansible.posix.acl:
-    path: "{{ app_deploy_root }}"
-    entity: ops
-    etype: user
-    permissions: rx
-    default: true
-    recursive: true
-    state: present
-  when: "'ops' in base_users"

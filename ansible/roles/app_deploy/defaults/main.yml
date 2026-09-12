@@ -2,32 +2,13 @@
 # Which applications this run touches. One app is -e "deploy_apps=['pixapi']".
 deploy_apps: "{{ applications.keys() | list }}"
 
-# How each app's version is chosen; set per environment in group_vars/env_*.
-#   latest    newest artifact in the bucket -- rc chases the tip
-#   manifest  exactly what the environment's manifest pins
-app_version_source: latest
-
-# Deploy a named historical manifest instead of `current` -- this is the
-# rollback: -e app_manifest=2026.09.10-2
-app_manifest: current
-
-# Overrides everything, for every app in deploy_apps.
-app_version: ""
-
-app_manifest_write: false
-app_release_tag: ""
-
-# True during a Packer build: the artifact is unpacked and `current` is
-# switched, but nothing is started or health-checked -- there is no live
-# service on a builder, and the unit comes up on the first boot of a real
-# instance.
-app_bake: false
-
 app_deploy_root: /srv/apps
 app_deploy_user: dotnetapp
-# Four .NET publish trees average ~60 MB each; five is the ceiling for a small
-# boot volume.
 app_releases_keep: 5
-app_deploy_health_path: /
-app_deploy_health_retries: 12
-app_deploy_health_delay: 5
+
+# True during a Packer build: unpack and switch, but start nothing -- there is
+# no live service on a builder.
+app_bake: false
+
+app_health_retries: 12
+app_health_delay: 5

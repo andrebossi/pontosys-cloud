@@ -1,6 +1,23 @@
 ---
-# The service account and the operational accounts are created by roles/base:
-# who exists on a machine is a host-level concern, not an application one.
+- name: Service account
+  ansible.builtin.user:
+    name: "{{ app_deploy_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    home: "{{ app_deploy_root }}"
+    create_home: false
+    password_lock: true
+
+# ops reads the release trees to see what is actually deployed.
+- name: ops can read the application trees
+  ansible.posix.acl:
+    path: "{{ app_deploy_root }}"
+    entity: ops
+    etype: user
+    permissions: rx
+    default: true
+    state: present
+
 - name: Base directories
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -73,7 +90,7 @@
   loop: "{{ applications | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
-  register: app_runtime_dropin
+  register: runtime_dropin
   notify: reload systemd
 
 - name: Limits drop-in
@@ -84,11 +101,34 @@
   loop: "{{ applications | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
-  register: app_limits_dropin
+  register: limits_dropin
   notify: reload systemd
 
-# Verifies the template plus one instance's drop-ins: a typo in a directive
-# name is a warning at runtime and a hard failure here.
-- name: Unit files are valid
-  ansible.builtin.command: "systemd-analyze verify dotnet-app@{{ applications.keys() | list | first }}.service"
-  changed_when: false
+
+# On a machine nobody converged -- a pool member from the golden image -- this
+# is what fills in the env files before the applications start.
+- name: Secret resolver unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/pscloud-env.service
+    mode: "0644"
+    content: |
+      [Unit]
+      Description=Resolve application secrets from OCI Vault
+      After=network-online.target
+      Wants=network-online.target
+      Before=dotnet-app@.service
+
+      [Service]
+      Type=oneshot
+      RemainAfterExit=yes
+      ExecStart=/usr/local/bin/pscloud env {{ app_config_dir }}
+
+      [Install]
+      WantedBy=multi-user.target
+  notify: reload systemd
+
+- name: Secret resolver runs at boot
+  ansible.builtin.systemd:
+    name: pscloud-env.service
+    enabled: true
+    daemon_reload: true

@@ -1,0 +1,6 @@
+---
+pscloud_venv: /opt/pscloud/venv
+# Set for local VMs, which have no instance principal. Points at an OCI config
+# on the control node; it is copied to /root/.oci on the target and the CLI
+# picks it up automatically.
+oci_config_dir: ""

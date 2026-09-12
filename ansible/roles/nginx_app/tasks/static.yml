@@ -1,59 +1,41 @@
 ---
-# The SPA bundles and the error pages, as one artifact. They are build output,
-# not configuration: they belong next to the application tarballs. Publish with
-#   tar -C webroot -czf webroot.tar.gz . && pscloud push webroot <ver> ./webroot.tar.gz
-# then bump webroot_version in group_vars -- a reviewed change, for the same
-# reason the golden image is pinned in Terraform rather than chased.
-- name: Document root
-  ansible.builtin.file:
-    path: "{{ nginx_static_root }}"
-    state: directory
-    owner: "{{ nginx_user }}"
-    group: "{{ nginx_user }}"
-    mode: "0755"
-
-- name: Web root download URL
-  ansible.builtin.command: >-
-    /usr/local/bin/pscloud par
-    artifacts/{{ webroot_artifact }}/{{ webroot_artifact }}-{{ webroot_version }}.tar.gz
-    --ttl {{ artifact_par_ttl }}
-  delegate_to: "{{ app_release_host }}"
-  register: webroot_par
-  changed_when: false
-  no_log: true
-  when: artifact_store == 'bucket'
-
-# ~140 MB across a few thousand files, so this one gets a version stamp: with
-# it the unpack is skipped outright when the version has not moved, instead of
-# unarchive reading the whole archive to work that out.
-- name: Web root
-  ansible.builtin.unarchive:
-    src: "{{ (webroot_par.stdout | trim) if artifact_store == 'bucket'
-             else local_artifact_dir ~ '/' ~ webroot_artifact ~ '/' ~ webroot_artifact ~ '-' ~ webroot_version ~ '.tar.gz' }}"
-    remote_src: "{{ artifact_store == 'bucket' }}"
-    dest: "{{ nginx_static_root }}"
-    owner: "{{ nginx_user }}"
-    group: "{{ nginx_user }}"
-    extra_opts: [--no-same-owner]
-    creates: "{{ nginx_static_root }}/.version-{{ webroot_version }}"
-  register: webroot_installed
-
-- name: Stamp the version
-  ansible.builtin.file:
-    path: "{{ nginx_static_root }}/.version-{{ webroot_version }}"
-    state: touch
+# Error pages ship with the role: eleven kilobytes, named by error_page in
+# nginx.conf, and nginx has to serve one before any artifact exists.
+- name: Error pages
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ nginx_static_root }}/{{ item }}"
     owner: "{{ nginx_user }}"
     group: "{{ nginx_user }}"
     mode: "0644"
-  when: webroot_installed is changed
-  changed_when: false
+  loop: [404.html, 50x.html, nginx-logo.png]
 
-# 404.html and 50x.html reference /poweredby.png, which was a symlink to
-# nginx-logo.png on the old machine; without it both pages render a broken
-# image.
 - name: poweredby.png
   ansible.builtin.file:
     path: "{{ nginx_static_root }}/poweredby.png"
     src: "{{ nginx_static_root }}/nginx-logo.png"
     state: link
     force: true
+
+# The three frontends in one tarball, unpacked over the document root.
+- name: Web root {{ webroot_version }}
+  ansible.builtin.command: "/usr/local/bin/pscloud fetch webroot {{ webroot_version }} {{ nginx_static_root }}"
+  args:
+    creates: "{{ nginx_static_root }}/.webroot-{{ webroot_version }}"
+  register: webroot
+
+- name: Stamp it
+  ansible.builtin.file:
+    path: "{{ nginx_static_root }}/.webroot-{{ webroot_version }}"
+    state: touch
+    mode: "0644"
+  when: webroot is changed
+  changed_when: false
+
+- name: Readable by nginx
+  ansible.builtin.file:
+    path: "{{ nginx_static_root }}"
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_user }}"
+    recurse: true
+  when: webroot is changed

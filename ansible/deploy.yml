@@ -1,89 +1,15 @@
 ---
-# Install application versions on machines. Nothing here decides when to move
-# on -- that is a person, or a pipeline step waiting on one.
+# Install the application versions from group_vars/role_app/applications.yml.
 #
-#   # 1. rc: a few machines that are IN the production load balancer.
-#   #    Real traffic, real database, one blast radius.
-#   ansible-playbook deploy.yml -l env_rc
-#
-#   # 2. it held up. Pin what rc validated as prod's target.
-#   ansible-playbook release.yml -e release_action=promote \
-#                                -e release_from_env=rc -e release_to_env=prod
-#
-#   # 3. canary: one prod machine, then the rest in batches.
-#   ansible-playbook deploy.yml -l env_prod --limit-file canary.txt
+#   ansible-playbook deploy.yml -l env_rc                    # canary VMs first
 #   ansible-playbook deploy.yml -l env_prod -e deploy_serial=25%
-#
-#   # one app
 #   ansible-playbook deploy.yml -l env_rc -e "deploy_apps=['pixapi']"
 #
-#   # rollback: re-deploy an older manifest
-#   ansible-playbook deploy.yml -l env_rc -e app_version_source=manifest \
-#                               -e app_manifest=2026.09.10-2
-
-# The CLI lives on the monitoring VM: it needs OCI credentials, and the
-# instance principal means there is no key on disk. Everything below reaches it
-# through delegate_to. Skipped entirely when artifact_store is local.
-- name: Release driver
-  hosts: role_monitoring
-  become: true
-  tags: [always]
-  roles:
-    - role: release
-      when: artifact_store == 'bucket'
-
-# Resolved for the whole fleet before any machine is touched, and NOT inside
-# the serial play below: with a serial rollout every batch is its own play, so
-# `latest` would be re-resolved per batch and a publish landing mid-rollout
-# would split the fleet across two versions.
-- name: Resolve the release
+# Rolling back is checking out the previous commit of applications.yml and
+# running it again -- git is the record of what each environment ran.
+- name: Deploy
   hosts: role_app
   become: true
-  tasks:
-    - name: Versions
-      ansible.builtin.include_role:
-        name: app_deploy
-        tasks_from: resolve.yml
-
-- name: Install it
-  hosts: role_app
-  become: true
-  # One VM at a time by default: the others keep serving while this one
-  # restarts, and a bad release stops at the first machine instead of all of
-  # them. `-e deploy_serial=25%` widens the batch once a canary has held.
   serial: "{{ deploy_serial | default(1) }}"
   roles:
     - app_deploy
-
-# After every machine is healthy, not before: a manifest written up front would
-# claim a release that a failed rollout never reached.
-- name: Record what landed
-  hosts: role_app
-  become: true
-  tasks:
-    # delegate_to, not a play against role_monitoring: the facts describing this
-    # rollout live on the app hosts, and `-l env_rc` has already narrowed them.
-    - name: Publish the manifest
-      ansible.builtin.command:
-        argv:
-          - /usr/local/bin/pscloud
-          - publish
-          - "{{ app_env }}"
-          - --release
-          - "{{ app_release_tag | default('', true) or ansible_date_time.iso8601_basic_short }}"
-          - --apps
-          - "{{ app_versions | dict2items | map(attribute='key')
-                | zip(app_versions.values()) | map('join', '=') | join(',') }}"
-          - --base-commit
-          - "{{ lookup('env', 'GIT_COMMIT') }}"
-      delegate_to: "{{ app_release_host }}"
-      run_once: true
-      register: manifest_published
-      changed_when: true
-      when: app_manifest_write | bool
-
-    - name: What was recorded
-      ansible.builtin.debug:
-        msg: "{{ manifest_published.stdout_lines }}"
-      run_once: true
-      when: manifest_published is not skipped

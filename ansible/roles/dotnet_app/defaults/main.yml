@@ -29,10 +29,10 @@ db_connection_options: >-
 # out TimeoutStartSec and then declare a working app failed.
 app_systemd_type: exec
 
+
 # Set at the runtime layer; repeated so the role can be used on its own.
 dotnet_root: /opt/dotnet
 dotnet_compat_dir: /opt/dotnet/compat
-dotnet_default_runtime: "5.0"
 dotnet_host_icu_version: "74"
 
 # The ceiling for the group, derived from the shape. Everything outside

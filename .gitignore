@@ -56,9 +56,4 @@ keys/*
 ### Ansible secrets ###
 ansible/group_vars/**/vault.yml
 ansible/host_vars/**/vault.yml
-# Copies of the old machine's configuration. They carry LIVE database, SMTP
-# and JWT credentials -- the values they hold are what OCI Vault now replaces
-# (see ansible/README.md). The rest of files/ is fonts and static assets and
-# is committed.
-ansible/files/nginx/nginx-config/**/appsettings*.json
-ansible/files
+data/*

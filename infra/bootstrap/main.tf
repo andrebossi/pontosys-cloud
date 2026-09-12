@@ -53,6 +53,16 @@ resource "oci_objectstorage_bucket" "state" {
   versioning = "Enabled"
 }
 
+resource "oci_objectstorage_bucket" "releases" {
+  compartment_id = var.compartment_id
+  namespace      = data.oci_objectstorage_namespace.this.namespace
+  name           = "${var.label_prefix}-releases"
+
+  access_type = "NoPublicAccess"
+  versioning  = "Enabled"
+}
+
+
 output "objectstorage_namespace" { value = data.oci_objectstorage_namespace.this.namespace }
 output "state_bucket" { value = oci_objectstorage_bucket.state.name }
 # output "state_kms_key_id" { value = oci_kms_key.state.id }

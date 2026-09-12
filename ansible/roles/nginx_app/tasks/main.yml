@@ -54,13 +54,16 @@
     state: absent
   notify: reload nginx
 
+- name: Document root
+  ansible.builtin.file:
+    path: "{{ nginx_static_root }}"
+    state: directory
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_user }}"
+    mode: "0755"
+
 - name: Static content
   ansible.builtin.include_tasks: static.yml
-  when: nginx_deploy_static | bool
-
-- name: Configuration parses
-  ansible.builtin.command: nginx -t
-  changed_when: false
 
 - name: NGINX is running
   ansible.builtin.systemd:

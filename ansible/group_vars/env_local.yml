@@ -1,37 +1,16 @@
 ---
-# LOCAL — VMs on a workstation, no cloud account.
-#
-# Two switches do the work. Everything else in the repository is the same code
-# the cloud runs, which is the point: if it converges here it is not going to
-# discover something new about itself in prod.
-#
-#   secrets_backend: local   a 0600 JSON file on the control node, generated on
-#                            first use, instead of OCI Vault
-#   artifact_store: local    a directory on the control node instead of the
-#                            bucket and its pre-authenticated URLs
+# VMs on a workstation. They pull the same artifacts from the same bucket and
+# read the same vault; the only difference is that they have no instance
+# principal, so they get the API key.
 app_env: local
-secrets_backend: local
-artifact_store: local
+oci_config_dir: "{{ lookup('env', 'HOME') }}/.oci"
 
-app_version_source: latest
-app_manifest_write: false
-
-# MySQL for local runs. A container on the workstation is enough:
-#   docker run -d --name pscloud-mysql -p 3306:3306 \
-#     -e MYSQL_ROOT_PASSWORD=... mysql:8.4
-# Then put that password in the local secret store as <prefix>-db-admin, or let
-# the first run generate one and set it on the server to match.
-db_host: "{{ lookup('env', 'PSCLOUD_DB_HOST') | default('192.168.122.1', true) }}"
-# A container is not on 10.20.0.0/16.
-db_user_host: "%"
-db_create_schemas: true
-
-# The VMs are smaller than the OCI shape. The slice ceilings, the GC limits and
-# the nginx worker count all follow from these two numbers.
+# Smaller VMs than the OCI shape.
 host_vcpus: 2
 host_memory_mb: 4096
 apps_slice_reserve_mb: 1200
 
-# ~140 MB of SPA bundles are not what you are testing locally. Turn it on once
-# you have published a webroot artifact.
-nginx_deploy_static: false
+# A MySQL container on the workstation is not on 10.20.0.0/16.
+db_host: "{{ lookup('env', 'PSCLOUD_DB_HOST') }}"
+db_user_host: "%"
+db_create_schemas: true

@@ -1,34 +1,18 @@
 ---
-# ===========================================================================
-# MONITORING VM — runs the observability-backend in Docker Compose.
-# The only host with a public IP; also acts as jump host and Ansible executor.
-# ===========================================================================
+# The observability backend, in Docker Compose. Also the jump host and the
+# Ansible executor.
 observability_dir: /opt/observability
 grafana_log_dir: /var/log/grafana
 
-# ---------------------------------------------------------------------------
-# THE MACHINE: 12 GB, arm64, and it is not dedicated to this.
+# The machine is 12 GB, arm64, and not dedicated to this -- RustDesk and a
+# desktop share it. 6 GB is allocated to the stack; the limits below sum to
+# 5.2 GB, leaving room for Docker's overhead and a restart overlapping a
+# running container. The rest of the box stays page cache, which is what
+# VictoriaMetrics and VictoriaLogs lean on hardest -- both are mmap-based.
 #
-#   monitoring stack     6.0 GB   the container limits below, plus headroom
-#   RustDesk + desktop  ~2.0 GB
-#   OS, docker, agent   ~1.0 GB
-#   page cache          ~3.0 GB   what VictoriaMetrics and VictoriaLogs lean
-#                                 on hardest -- both are mmap-based, and their
-#                                 read path is the page cache
-#
-# The limits below sum to 5.2 GB, which is the 6 GB allocation minus room for
-# docker's own overhead and a restart overlapping a running container.
-#
-# -memory.allowedBytes is MANDATORY on both VictoriaMetrics and VictoriaLogs:
-# the default (-memory.allowedPercent 60) is computed against the HOST's RAM,
-# not the container limit. Inside a 2 GB container the process would think it
-# can use 7.2 GB and get killed by the cgroup OOM killer. Each is set to ~70%
-# of its own limit, leaving the rest for Go's non-heap allocations.
-#
-# Every image here publishes a linux/arm64 manifest, so nothing is pinned to a
-# platform -- the daemon picks. The docker apt repository is the one place the
-# architecture had to be derived rather than assumed; see roles/monitoring_stack.
-# ---------------------------------------------------------------------------
+# -memory.allowedBytes is mandatory on both: the default is computed against
+# the HOST's RAM, so inside a 2 GB container the process would believe it can
+# use 7.2 GB and get OOM-killed by the cgroup. Each is ~70% of its own limit.
 # Asserted against the sum of the container limits, so an edit that quietly
 # overcommits the machine fails the converge instead of the OOM killer.
 monitoring_mem_budget_mb: 6144
@@ -46,14 +30,8 @@ vmalert_mem_limit: 256M
 alertmanager_mem_limit: 192M
 grafana_mem_limit: 768M
 
-# ---------------------------------------------------------------------------
-# DISK
-#
-# Both are hard ceilings, not targets. Leave at least 20% of the filesystem
-# free on top of these: merges and compaction need scratch space, and without
-# it VictoriaMetrics drops into read-only mode -- which looks exactly like the
-# fleet having gone quiet.
-# ---------------------------------------------------------------------------
+# Hard ceilings, not targets. Leave 20% of the filesystem free on top: without
+# scratch space for merges VictoriaMetrics drops into read-only mode.
 vm_max_disk: 20GB
 vm_retention: 3m
 vl_max_disk: 30GB
@@ -62,11 +40,8 @@ vl_retention: 30d
 # monitoring_fqdn: grafana.example.com
 # grafana_admin_password: set this in host_vars with Ansible Vault.
 
-# ---------------------------------------------------------------------------
-# The monitoring VM monitors itself, and monitors its own backends.
-# Without this, the day VictoriaMetrics fills up the disk is the day
-# nobody finds out about anything.
-# ---------------------------------------------------------------------------
+# The backends watch themselves. Without this, the day VictoriaMetrics fills
+# the disk is the day nobody finds out about anything.
 fluentbit_extra_inputs:
   - name: prometheus_scrape
     tag: backend_metrics
@@ -90,10 +65,8 @@ fluentbit_extra_inputs:
     scrape_interval: 60s
 
 fluentbit_extra_filters:
-  # A single VictoriaMetrics /metrics endpoint yields ~1500 series. Keeping all
-  # of them would make the backend spend more space on itself than on the
-  # fleet. Only the ones that answer "is the backend up, does it have disk,
-  # and is it ingesting" are kept here.
+  # A single /metrics endpoint yields ~1500 series. Only the ones that answer
+  # "is it up, does it have disk, is it ingesting" are kept.
   - name: metrics_selector
     match: backend_metrics
     metric_name: |

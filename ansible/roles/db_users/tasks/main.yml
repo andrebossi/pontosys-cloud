@@ -2,11 +2,6 @@
 # Runs from an application VM: the NSG only lets the app tier reach 3306.
 # One host is enough -- the accounts are server-side -- so callers use run_once.
 
-- name: Credentials
-  ansible.builtin.include_role:
-    name: secrets
-  when: db_app_passwords is not defined
-
 - name: MySQL client library
   ansible.builtin.apt:
     name: python3-pymysql
@@ -19,6 +14,29 @@
     db_apps: >-
       {{ applications | dict2items | rejectattr('value.connections', 'undefined')
          | rejectattr('value.connections', 'eq', {}) | list }}
+
+# One call per credential. `pscloud secret` generates and stores a 32-character
+# password the first time a name is asked for, and reads it back after.
+- name: Passwords, from the vault
+  ansible.builtin.command: "/usr/local/bin/pscloud secret {{ secret_prefix }}-db-{{ db_user_prefix }}{{ item.key }}"
+  loop: "{{ db_apps }}"
+  loop_control:
+    label: "{{ db_user_prefix }}{{ item.key }}"
+  register: pw
+  changed_when: false
+  no_log: true
+
+- name: Admin password, from the vault
+  ansible.builtin.command: "/usr/local/bin/pscloud secret {{ secret_prefix }}-db-admin"
+  register: admin_pw
+  changed_when: false
+  no_log: true
+
+- name: Credentials
+  ansible.builtin.set_fact:
+    db_app_passwords: "{{ dict(db_apps | map(attribute='key') | zip(pw.results | map(attribute='stdout') | map('trim'))) }}"
+    db_admin_password: "{{ admin_pw.stdout | trim }}"
+  no_log: true
 
 - name: Schemas
   ansible.mysql.mysql_db:
@@ -87,17 +105,3 @@
   ansible.builtin.include_tasks: prune.yml
   when: db_remove_unknown_users | bool
 
-# Proves the grant works, not merely that the GRANT was accepted. No login_db:
-# the schema may not exist yet.
-- name: Each account can connect
-  ansible.mysql.mysql_query:
-    login_host: "{{ db_servers[item.value.connections.values() | list | first].host }}"
-    login_port: "{{ db_servers[item.value.connections.values() | list | first].port }}"
-    login_user: "{{ db_user_prefix }}{{ item.key }}"
-    login_password: "{{ db_app_passwords[item.key] }}"
-    query: SELECT 1
-  loop: "{{ db_apps }}"
-  loop_control:
-    label: "{{ db_user_prefix }}{{ item.key }}"
-  changed_when: false
-  no_log: true

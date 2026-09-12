@@ -1,27 +1,16 @@
 ---
-# ===========================================================================
-# WHAT THE HOST PROVIDES, AND WHAT AN APPLICATION MAY SPEND
+# Ceilings, in two levels, so one misbehaving app cannot take the box down
+# and the eight of them together cannot either:
 #
-# 2 vCPU, 6 GB, nine .NET processes. Nothing here is a measurement of how much
-# an app uses -- these are CEILINGS, in two levels, so one misbehaving app
-# cannot take the box down and the nine of them together cannot either.
-#
-#   apps.slice                    ~4.4 GB, the ceiling for the GROUP
-#     └ dotnet-app@<name>.service the ceiling for ONE app
-# ===========================================================================
+#   apps.slice                    the group
+#     └ dotnet-app@<name>.service  one application
 
-# Everything outside apps.slice: kernel, nginx, fluent-bit, and the page cache
-# that keeps .dll reads off the disk. Raise it if the box gains a resident
-# service; the slice ceilings follow.
+# Everything outside apps.slice. The slice ceilings follow from it.
 apps_slice_reserve_mb: 1600
 
-# MemoryHigh is SOFT: crossing it makes the kernel throttle and reclaim, which
-# is the window where the .NET GC still has time to react. MemoryMax is hard,
-# and crossing it is an OOM kill. The distance between them is the margin.
-#
-# CPUQuota is a ceiling; CPUWeight decides who wins a contended core. The
-# quota is also what makes the kernel fill throttled_usec in cpu.stat, which
-# is where the throttling metric comes from.
+# MemoryHigh is soft -- the kernel throttles and reclaims, which is the window
+# where the GC can still react. MemoryMax is hard, and crossing it is an OOM
+# kill. CPUQuota is also what makes the kernel fill throttled_usec in cpu.stat.
 app_tiers:
   site:
     memory_min: 128M
@@ -63,60 +52,6 @@ app_tiers:
     cpu_weight: 50
     io_weight: 20
 
-# ---------------------------------------------------------------------------
-# .NET RUNTIMES
-#
-# Both are out of support and neither has a package for Ubuntu 24.04, so each
-# gets its OWN install root. Stacking them under one root overwrites the
-# `dotnet` host binary with the older one and makes rollforward depend on what
-# was installed last. Each unit names its runtime explicitly.
-#
-# icu: `host` hands the distribution's libicu over through
-# CLR_ICU_VERSION_OVERRIDE -- these runtimes only probe up to ICU 67 and
-# Ubuntu 24.04 ships 74, so without it the process aborts on startup.
-# `invariant` starts anywhere but degrades pt-BR dates, currency and string
-# comparison, so it is a fallback and not a default.
-# ---------------------------------------------------------------------------
-dotnet_runtimes:
-  "5.0":
-    version: "5.0.15"
-    icu: host
-  "2.1":
-    version: "2.1.30"
-    icu: host
-
-dotnet_default_runtime: "5.0"
-
-# .NET 5 and Core 2.1 dlopen libssl.so.1.1 by soname and Ubuntu 24.04 has
-# OpenSSL 3 only. The .deb is UNPACKED into a private directory rather than
-# installed: `apt install libssl1.1` would put an unpatched TLS library on the
-# search path of every process on the box, sshd included.
-# arm64 is published on ports.ubuntu.com, not security.ubuntu.com -- the two
-# archives are separate, and the amd64 path 404s for arm64.
-dotnet_compat_packages:
-  - name: libssl1.1
-    url: >-
-      {{ 'http://ports.ubuntu.com/ubuntu-ports' if deb_arch == 'arm64'
-         else 'http://security.ubuntu.com/ubuntu' }}/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_{{ deb_arch }}.deb
-    provides:
-      - libssl.so.1.1
-      - libcrypto.so.1.1
-
-# Report layouts reference these faces by name. Missing, libgdiplus
-# substitutes a default and the invoice comes out with the wrong column
-# widths -- a silent corruption, not an error. The files live in
-# the `fonts` artifact and are verified against the system font cache after
-# they are unpacked.
-dotnet_fonts:
-  - arial.ttf
-  - arialbd.ttf
-  - arialbi.ttf
-  - ariali.ttf
-  - ariblk.ttf
-  - tahoma.ttf
-  - tahomabd.ttf
-  - ORATOR10.TTF
-
 # Applied to every app unit. The COMPlus_ prefix is deliberate: DOTNET_ as a
 # runtime-configuration prefix only became valid in .NET 6, and written that
 # way here it would be silently ignored.
@@ -134,14 +69,9 @@ dotnet_runtime_env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   ASPNETCORE_ENVIRONMENT: "Production"
 
-# ---------------------------------------------------------------------------
-# NGINX
-#
-# One server on port 80 -- the load balancer terminates TLS and is the only
-# thing that reaches it -- routing BY PATH. Path routing is not a preference:
-# the apps build absolute URLs from the prefix (UrlApis in appsettings), so
-# host-based routing would need every one of those rewritten.
-# ---------------------------------------------------------------------------
+# One server on port 80 -- the load balancer terminates TLS -- routing by path.
+# Path routing is not a preference: the apps build absolute URLs from the
+# prefix, so host-based routing would need every one of those rewritten.
 nginx_listen_port: 80
 # stub_status on loopback, scraped by Fluent Bit's nginx_metrics input.
 nginx_status_port: 8081
@@ -150,9 +80,8 @@ nginx_status_port: 8081
 # serving; this one goes through to a real application.
 readyz_app: monitorclientesapi
 
-# The old machine used 600s for everything, so a hung payment held a worker
-# connection for ten minutes. Reports keep it -- rendering a 40-page NFe
-# genuinely takes minutes -- and everything else fails fast.
+# The old machine used 600s for everything, so a hung payment held a worker for
+# ten minutes. Reports keep it; everything else fails fast.
 app_nginx_tiers:
   site:
     connect_timeout: 5s
@@ -175,8 +104,6 @@ app_nginx_tiers:
     send_timeout: 600s
     client_max_body_size: 128m
 
-# The OCI Ubuntu image ships an INPUT chain ending in REJECT. This is what
-# cloud-init used to open; it belongs with the rest of the host configuration.
-# The status port stays closed -- Fluent Bit scrapes it over loopback.
+# The OCI image ships an INPUT chain ending in REJECT.
 base_open_ports:
   - "{{ nginx_listen_port }}"

@@ -1,10 +1,2 @@
 ---
-# PROD — the immutable environment. An autoscaling instance pool: a machine can
-# appear at any moment and must boot complete, which is why it is served by a
-# baked image.
-#
-# Deploys install exactly what the manifest pins. `latest` is deliberately not
-# an option: a version reaches prod by being promoted, never by being resolved.
 app_env: prod
-app_version_source: manifest
-app_manifest_write: false

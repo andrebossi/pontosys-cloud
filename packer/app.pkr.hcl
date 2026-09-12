@@ -103,7 +103,7 @@ build {
     playbook_file = "${path.root}/../ansible/image.yml"
     user          = "ubuntu"
     extra_arguments = [
-      "--extra-vars", "image_manifest_env=${var.manifest_env} app_release_tag=${local.release}",
+      "--extra-vars", "app_env=${var.manifest_env} app_release_tag=${local.release}",
       "--scp-extra-args", "-O",
     ]
   }

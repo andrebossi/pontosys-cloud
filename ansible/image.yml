@@ -1,69 +1,30 @@
 ---
-# The golden image, run by Packer inside a temporary instance.
+# The golden image, built by Packer against a throwaway instance.
 #
-# Run Packer FROM THE MONITORING VM: it is already the Ansible executor, and
-# its instance principal is what mints the artifact download URLs. That is also
-# why app_release_host is localhost here -- there is no monitoring host in
-# Packer's inventory, and localhost is that machine.
-#
-# The image is a function of (this repository at a commit) + (the environment's
-# manifest). It is never a snapshot of a machine that has served traffic: that
-# would capture accumulated release directories, agent buffers and whatever was
-# fixed by hand at 2am.
-- name: Application golden image
+# It comes out complete -- runtime, fonts, nginx, the frontends, the units, the
+# agent and the applications at the versions in applications.yml -- and carries
+# no credential: the env files are @@secret@@ templates that pscloud-env.service
+# resolves on first boot with the instance's own principal.
+- name: Golden image
   hosts: default
   become: true
-
   vars:
-    # prod, because that is what an instance pool boots from; rc is served in
-    # place by deploy.yml.
-    image_manifest_env: prod
-
     app_bake: true
-    app_env: "{{ image_manifest_env }}"
-    app_version_source: manifest
-    app_manifest_write: false
-    app_release_host: localhost
-
   roles:
     - base
-    - role: dotnet_runtime
-      vars:
-        # The catalog is not consulted: the image is shared by the whole fleet
-        # and carries libgdiplus and the fonts regardless of which apps happen
-        # to need them today.
-        dotnet_install_drawing: true
-    - role: nginx_app
-      vars:
-        nginx_deploy_static: false
+    - pscloud
+    - dotnet_runtime
+    - nginx_app
+    - dotnet_app
+    - app_deploy
     - observability_agent
 
   post_tasks:
-    # Units, slice and directories only. dotnet_app's config.yml reads
-    # credentials and is deliberately left out -- an image carries none.
-    - name: Units and limits
-      ansible.builtin.include_role:
-        name: dotnet_app
-        tasks_from: units.yml
-
-    # The applications, at the versions the manifest pins. Same role, same
-    # tarballs, same symlink switch as a live deploy, so the only untested
-    # difference is a fresh unpack versus an unpack over an existing tree.
-    - name: Applications from the {{ image_manifest_env }} manifest
-      ansible.builtin.include_role:
-        name: app_deploy
-
     - name: Strip machine state before capture
       ansible.builtin.shell:
         cmd: |
           rm -rf /var/lib/fluent-bit/*.db /var/lib/fluent-bit/storage/*
-          # A cloned machine-id makes every VM in the pool report the same
-          # journal identity. Truncated, not deleted: systemd regenerates it on
-          # first boot only if the file exists and is empty.
           truncate -s 0 /etc/machine-id
           cloud-init clean --logs || true
-          truncate -s 0 /var/log/*.log || true
-          rm -f /var/cache/*.deb /var/cache/*.tar.gz
-          rm -f /run/instance.env
-        executable: /bin/bash
+          rm -f /run/instance.env /etc/dotnet-apps/*.env
       changed_when: true

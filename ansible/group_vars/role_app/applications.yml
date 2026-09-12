@@ -1,46 +1,33 @@
 ---
-# ===========================================================================
-# APPLICATION CATALOG
+# One entry per application. The version is right here: bumping it and running
+# deploy.yml is a release, and git is the record of what every environment ran.
 #
-# One dictionary. Adding an application is one entry here; everything
-# downstream is generated from it -- the systemd unit and its limits, the
-# nginx upstream and location, the appsettings overlay and the secret env
-# file, the database account and grant, the `app` label on every log line and
-# request metric, and the deploy target.
-#
-#   dll          entry assembly, as produced by `dotnet publish`
-#   port         local Kestrel port, always on 127.0.0.1. These are the ports
-#                the previous machine used: an app that pins its own URL in
-#                Program.cs ignores ASPNETCORE_URLS.
-#   path         nginx location prefix, passed through to Kestrel INTACT --
-#                the apps build absolute URLs from it (see UrlApis).
-#   tier         resource and timeout class; see app_tiers in platform.yml.
-#   runtime      key into dotnet_runtimes. Omitted = dotnet_default_runtime.
-#   drawing      pulls in libgdiplus and the MS fonts (System.Drawing).
-#   linked_dirs  state that must survive a release: it lives in shared/ and is
-#                symlinked into each release.
-#   connections  .NET connection-string name -> key in db_servers. Also what
-#                grants the application's database account.
-#   db_privileges  optional, keyed by server; overrides the default grant.
-# ===========================================================================
+#   version      the tarball in the bucket: artifacts/<name>/<name>-<version>.tar.gz
+#   dll          entry assembly, as produced by dotnet publish
+#   port         Kestrel port on 127.0.0.1, the same ones the old machine used
+#   path         nginx location prefix, passed through to Kestrel intact
+#   tier         resource and timeout class, see app_tiers in platform.yml
+#   linked_dirs  state that survives a release; lives in shared/ and is
+#                symlinked into each release
+#   connections  connection-string name -> key in db_servers. Also what grants
+#                the application's database account.
 
 applications:
 
   virtualstore:
+    version: "2026.09.06"
     description: Virtual Store — vendas
     dll: VirtualStore.Vendas.Service.Api.dll
     port: 5000
     path: /virtualstore
     tier: site
-    drawing: true
     linked_dirs: [logs, Contents, Relatorios]
     connections:
       VSGlobalContext: global
       CepContext: cep
 
   monitorclientesapi:
-    # The global client directory: every other API resolves connection data
-    # through it, so it is critical even though it is small.
+    version: "2026.09.06"
     description: Monitor de clientes — global directory
     dll: MonitorClientes.Monitoramento.WebApi.dll
     port: 5002
@@ -50,6 +37,7 @@ applications:
       MonitoramentoContext: global
 
   dashsapi:
+    version: "2026.09.06"
     description: Dashboards
     dll: VirtualStore.Dashboards.Api.dll
     port: 5003
@@ -58,16 +46,17 @@ applications:
     connections: {}
 
   relatoriosapi:
+    version: "2026.09.06"
     description: Relatórios (NFe/NFCe rendering)
     dll: VirtualStore.Relatorios.Api.dll
     port: 5004
     path: /relatoriosapi
     tier: batch
-    drawing: true
     linked_dirs: [Relatorios, Fonts]
     connections: {}
 
   geradorrelatoriosapi:
+    version: "2026.09.06"
     description: Gerador de relatórios
     dll: MonitorClientes.Relatorio.WebApi.dll
     port: 5005
@@ -77,6 +66,7 @@ applications:
       RelatoriosContext: global
 
   cadastrosapi:
+    version: "2026.09.06"
     description: Cadastros
     dll: VirtualStore.Cadastros.Api.dll
     port: 5006
@@ -87,6 +77,7 @@ applications:
       CepContext: cep
 
   entradaapi:
+    version: "2026.09.06"
     description: Entradas de mercadoria
     dll: VirtualStore.Entradas.API.dll
     port: 5007
@@ -97,8 +88,7 @@ applications:
       CepContext: cep
 
   pixapi:
-    # Holds per-client certificates under Contents/Clientes, which is why that
-    # directory is linked and never shipped in the artifact.
+    version: "2026.09.06"
     description: Integração PIX
     dll: VirtualStore.Integrations.Pix.Api.dll
     port: 5008
@@ -107,21 +97,19 @@ applications:
     linked_dirs: [Contents]
     connections: {}
 
-# The Ionic storefront at / and the two Flutter builds, served straight from
-# disk. spa: false is deliberate -- `try_files $uri $uri/ <index>` would answer
-# every unknown path with the shell and a 200, and the 404 page would never
-# fire again. These builds route on the fragment, which the browser never
-# sends to the server, so the fallback buys nothing.
+# The three frontends in one tarball, unpacked over the document root.
+webroot_version: "2026.09.06"
+
+# nginx location -> index. spa: false is deliberate -- try_files would answer
+# every unknown path with the shell and a 200, and the error page would never
+# fire again. These builds route on the fragment, which never reaches nginx.
 static_sites:
   root:
     path: /
-    spa: false
     index: /index.html
   app:
     path: /app
-    spa: false
     index: /app/index.html
   monitorclientes:
     path: /monitorclientes
-    spa: false
     index: /monitorclientes/index.html

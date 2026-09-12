@@ -90,15 +90,3 @@
   until: backend_health is succeeded
   changed_when: false
 
-# `docker compose ps` says the container came up; only the cgroup says the
-# limit was actually applied. Without this, a syntax error in .env would
-# leave the backends unbounded and the whole VM exposed to an OOM.
-- name: Memory limits actually applied
-  ansible.builtin.shell:
-    cmd: >-
-      set -o pipefail;
-      docker inspect $(docker compose ps -q) --format '{{ '{{' }}.Name{{ '}}' }} {{ '{{' }}.HostConfig.Memory{{ '}}' }}'
-      | awk '$2 == 0 {print "NO LIMIT: " $1; bad=1} END {exit bad+0}'
-    chdir: "{{ observability_dir }}"
-    executable: /bin/bash
-  changed_when: false

@@ -1,49 +1,18 @@
 ---
+# Every application in the catalog targets Microsoft.AspNetCore.App 5.0.0.
+dotnet_version: "5.0.15"
 dotnet_root: /opt/dotnet
 dotnet_compat_dir: /opt/dotnet/compat
 dotnet_fonts_dir: /usr/local/share/fonts/msttcore
 
-dotnet_runtimes: {}
-dotnet_compat_packages: []
-dotnet_fonts: []
-
-# The font bundle in the artifact store. Pinned, not `latest`: an image build
-# that silently picked up a new set of faces would change every report it
-# renders without anything in git saying so.
-fonts_artifact: fonts
-fonts_version: "1"
-
-# dotnetcli.azureedge.net was retired in 2024; this CDN still serves
-# out-of-support versions.
-dotnet_download_base: https://builds.dotnet.microsoft.com/dotnet
-
-# The OCI application VMs are x86_64; a local test VM on an ARM laptop is not.
-# Everything architecture-specific -- the runtime tarball, the OpenSSL .deb,
-# the multiarch library directory -- derives from this one fact.
+# x86_64 in OCI, aarch64 on a local test VM.
 dotnet_arch: "{{ {'x86_64': 'x64', 'aarch64': 'arm64'}[ansible_architecture] }}"
 deb_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_architecture] }}"
 
-# The ASP.NET Core runtime, not the base one: it carries both shared
-# frameworks plus the host, which is exactly what a framework-dependent web
-# app needs. The SDK is deliberately absent -- nothing compiles on this box.
-dotnet_package: aspnetcore-runtime
-
-dotnet_drawing_packages:
-  - libgdiplus
-  - libc6-dev
-  - libx11-6
-  - fontconfig
-
-# The families the report layouts ask for BY NAME, as they are actually
-# recorded in the fonts bundle in the artifact store. Orator's family is
-# "Orator10 BT", not "Orator": a layout asking for the latter silently gets a
-# substitute face and the invoice comes out with shifted columns.
-dotnet_font_families:
-  - Arial
-  - Arial Black
-  - Tahoma
-  - Orator10 BT
-
-# Computed from the catalog, but overridable: the golden image bakes drawing
-# support in unconditionally.
-dotnet_install_drawing: "{{ applications | default({}) | dict2items | selectattr('value.drawing', 'defined') | selectattr('value.drawing') | list | length > 0 }}"
+# .NET 5 dlopens libssl.so.1.1 and Ubuntu 24.04 ships OpenSSL 3 only. The .deb
+# is unpacked into a private directory, never installed: apt install libssl1.1
+# would put an end-of-life TLS library on the search path of every process.
+# arm64 lives on ports.ubuntu.com, a separate archive from security.ubuntu.com.
+libssl_url: >-
+  {{ 'http://ports.ubuntu.com/ubuntu-ports' if deb_arch == 'arm64'
+     else 'http://security.ubuntu.com/ubuntu' }}/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_{{ deb_arch }}.deb

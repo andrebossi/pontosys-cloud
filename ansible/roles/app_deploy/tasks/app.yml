@@ -1,0 +1,106 @@
+---
+- name: "{{ app_name }}"
+  vars:
+    app: "{{ applications[app_name] }}"
+    home: "{{ app_deploy_root }}/{{ app_name }}"
+    release: "{{ app_deploy_root }}/{{ app_name }}/releases/{{ applications[app_name].version }}"
+  block:
+
+    # The machine downloads it itself, with its own identity -- instance
+    # principal in OCI, the API key on a local VM.
+    - name: "{{ app_name }} — fetch {{ app.version }}"
+      ansible.builtin.command: "/usr/local/bin/pscloud fetch {{ app_name }} {{ app.version }} {{ release }}"
+      args:
+        creates: "{{ release }}/{{ app.dll }}"
+
+    - name: "{{ app_name }} — owner"
+      ansible.builtin.file:
+        path: "{{ release }}"
+        state: directory
+        owner: "{{ app_deploy_user }}"
+        group: "{{ app_deploy_user }}"
+        recurse: true
+
+    # State that outlives the release: certificates, generated reports, fiscal
+    # tables. They live in shared/ and are linked into the release tree.
+    - name: "{{ app_name }} — link state and settings"
+      ansible.builtin.file:
+        path: "{{ release }}/{{ item }}"
+        src: "{{ home }}/shared/{{ item }}"
+        state: link
+        force: true
+        owner: "{{ app_deploy_user }}"
+        group: "{{ app_deploy_user }}"
+      loop: "{{ (app.linked_dirs | default([])) + ['appsettings.Production.json'] }}"
+
+    - name: "{{ app_name }} — what is running now"
+      ansible.builtin.stat:
+        path: "{{ home }}/current"
+      register: current
+
+    # Replacing a symlink is atomic: there is no instant where `current` points
+    # at a half-unpacked tree.
+    - name: "{{ app_name }} — switch to {{ app.version }}"
+      ansible.builtin.file:
+        path: "{{ home }}/current"
+        src: "{{ release }}"
+        state: link
+        owner: "{{ app_deploy_user }}"
+        group: "{{ app_deploy_user }}"
+
+    - name: "{{ app_name }} — restart"
+      ansible.builtin.systemd:
+        name: "dotnet-app@{{ app_name }}.service"
+        state: restarted
+        enabled: true
+        daemon_reload: true
+      when: not app_bake | bool
+
+    # Type=exec reports "started" as soon as execve succeeds, which says nothing
+    # about whether Kestrel is listening. Any HTTP answer proves it is up.
+    - name: "{{ app_name }} — answers on 127.0.0.1:{{ app.port }}"
+      ansible.builtin.uri:
+        url: "http://127.0.0.1:{{ app.port }}/"
+        status_code: [200, 201, 204, 301, 302, 400, 401, 403, 404, 405]
+      register: health
+      retries: "{{ app_health_retries }}"
+      delay: "{{ app_health_delay }}"
+      until: health is succeeded
+      when: not app_bake | bool
+
+    - name: "{{ app_name }} — keep the last {{ app_releases_keep }} releases"
+      ansible.builtin.shell:
+        cmd: cd {{ home }}/releases && ls -1dt */ | tail -n +{{ app_releases_keep + 1 }} | xargs -r rm -rf
+      changed_when: true
+
+  rescue:
+    # Automatic: the alternative is leaving a broken release live while someone
+    # reads the error.
+    - name: "{{ app_name }} — roll back"
+      ansible.builtin.file:
+        path: "{{ home }}/current"
+        src: "{{ current.stat.lnk_target }}"
+        state: link
+      when: current.stat.lnk_target is defined
+
+    - name: "{{ app_name }} — restart the previous release"
+      ansible.builtin.systemd:
+        name: "dotnet-app@{{ app_name }}.service"
+        state: restarted
+      when: current.stat.lnk_target is defined and not app_bake | bool
+      failed_when: false
+
+    - name: "{{ app_name }} — journal"
+      ansible.builtin.command: "journalctl -u dotnet-app@{{ app_name }}.service -n 50 --no-pager"
+      register: journal
+      changed_when: false
+      failed_when: false
+
+    - name: "{{ app_name }} — failed"
+      ansible.builtin.fail:
+        msg: |
+          {{ app_name }} {{ app.version }} failed.
+          {{ 'Rolled back to ' ~ current.stat.lnk_target if current.stat.lnk_target is defined
+             else 'Nothing was running before.' }}
+
+          {{ journal.stdout }}

@@ -24,7 +24,7 @@ server {
     # ERROR PAGES
     #
     # Same files and same mapping as the previous machine
-    # (404.html and 50x.html, from the webroot artifact).
+    # (404.html and 50x.html, shipped with the role).
     # ------------------------------------------------------------------
 {% for code, page in nginx_error_pages.items() %}
 {% if code == '50x' %}

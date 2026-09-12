@@ -13,6 +13,10 @@ Wants=network-online.target
 # fails the start cleanly instead of producing a crash loop whose journal says
 # only "file not found".
 AssertPathExists={{ app_deploy_root }}/%i/current
+# On a machine nobody converged -- a pool member -- the env file is written at
+# boot from the vault. Without this the unit races it and fails on a missing
+# EnvironmentFile.
+After=pscloud-env.service
 
 # Default is 5 starts in 10s, after which systemd gives up FOREVER. An app
 # that is down because the database is unreachable would stay dead long after

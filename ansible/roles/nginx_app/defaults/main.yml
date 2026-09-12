@@ -55,14 +55,9 @@ app_upstream_fail_timeout: 10s
 # Nine upstreams x 16 x 2 workers = 288 sockets, well inside the fd limit.
 app_upstream_keepalive: 16
 
-# ~140 MB of SPA bundles do not belong in a machine image; site.yml installs
-# them.
-nginx_deploy_static: true
-
-webroot_artifact: webroot
-webroot_version: "1"
 
 applications: {}
 static_sites: {}
+webroot_version: ""
 app_nginx_tiers: {}
 readyz_app: ""

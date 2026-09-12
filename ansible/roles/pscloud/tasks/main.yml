@@ -1,0 +1,59 @@
+---
+# The CLI every machine uses to reach OCI: artifacts out of the bucket and
+# secrets out of the vault. It authenticates with the instance principal in
+# OCI, or with ~/.oci/config when one is present -- which is the only
+# difference between a local VM and a real one.
+- name: Python venv
+  ansible.builtin.apt:
+    name: [python3-venv, python3-pip]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Directory
+  ansible.builtin.file:
+    path: "{{ pscloud_venv | dirname }}"
+    state: directory
+    mode: "0755"
+
+- name: OCI SDK
+  ansible.builtin.pip:
+    name: oci
+    virtualenv: "{{ pscloud_venv }}"
+    virtualenv_command: python3 -m venv
+
+- name: CLI
+  ansible.builtin.copy:
+    src: pscloud.py
+    dest: "{{ pscloud_venv | dirname }}/pscloud.py"
+    mode: "0755"
+
+- name: Wrapper
+  ansible.builtin.copy:
+    dest: /usr/local/bin/pscloud
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      export PSCLOUD_BUCKET={{ artifact_bucket }}
+      export PSCLOUD_COMPARTMENT={{ compartment_ocid }}
+      export PSCLOUD_VAULT={{ oci_vault_id }}
+      export PSCLOUD_VAULT_KEY={{ oci_vault_key_id }}
+      exec {{ pscloud_venv }}/bin/python {{ pscloud_venv | dirname }}/pscloud.py "$@"
+
+# Local VMs only: they have no instance principal, so they get the same API key
+# the workstation uses. In OCI this is skipped and nothing is on disk.
+- name: OCI credentials for machines without an instance principal
+  when: oci_config_dir | length > 0
+  block:
+    - name: Directory
+      ansible.builtin.file:
+        path: /root/.oci
+        state: directory
+        mode: "0700"
+
+    - name: Config and key
+      ansible.builtin.copy:
+        src: "{{ oci_config_dir }}/"
+        dest: /root/.oci/
+        mode: "0600"
+      no_log: true

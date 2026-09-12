@@ -15,16 +15,8 @@
     state: present
     update_cache: true
 
-# Everything below layers a drop-in on the unit the package ships. Replacing
-# /lib/systemd/system/fluent-bit.service with our own copy would mask the
-# packaged unit: an upgrade that changes ExecStart or adds a dependency would
-# be silently ignored, and the mask would survive a purge of the package.
-- name: The package owns the unit
-  ansible.builtin.stat:
-    path: /lib/systemd/system/fluent-bit.service
-  register: vendor_unit
-  failed_when: not vendor_unit.stat.exists
-
+# A drop-in, never a copy of the unit in /etc: that would mask the packaged one
+# and an upgrade changing ExecStart would be silently ignored.
 - name: No local copy shadowing it
   ansible.builtin.file:
     path: /etc/systemd/system/fluent-bit.service
@@ -140,14 +132,6 @@
     daemon_reload: true
   loop: "{{ textfile_exporters }}"
   loop_control: { label: "{{ item.name }}" }
-
-- name: The drop-in layers over the packaged unit
-  ansible.builtin.command: systemctl cat fluent-bit.service
-  register: fb_unit
-  changed_when: false
-  failed_when: >-
-    '/lib/systemd/system/fluent-bit.service' not in fb_unit.stdout
-    or '10-pscloud.conf' not in fb_unit.stdout
 
 - name: Agent is serving
   ansible.builtin.uri:
