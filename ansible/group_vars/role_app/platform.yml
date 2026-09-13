@@ -55,6 +55,7 @@ dotnet_runtime_env:
   ASPNETCORE_ENVIRONMENT: "Production"
 
 nginx_listen_port: 80
+nginx_access_log: /var/log/nginx/access.json.log
 nginx_status_port: 8081
 
 readyz_app: monitorclientesapi

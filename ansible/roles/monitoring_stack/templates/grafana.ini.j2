@@ -1,14 +1,29 @@
 # {{ ansible_managed }}
+#
+# Only what differs from the shipped defaults. Option names and defaults are
+# from grafana.com/docs/grafana/latest/setup-grafana/configure-grafana/.
+
 [log]
-mode = file
+# `console file`, not `file` alone: the file is what fail2ban reads, and the
+# console is what `docker logs grafana` shows. Dropping console would make the
+# container silent exactly when you are trying to find out why it will not
+# start.
+mode = console file
 level = info
 
 [log.file]
 log_rotate = true
-max_days = 7
+max_days = {{ grafana_log_max_days }}
 
 [security]
+# Signs data source secrets in the Grafana database. The default is a value
+# published in Grafana's own source, so anyone with the database can decrypt
+# them. From the vault, like the admin password.
+secret_key = {{ grafana_secret_key }}
 disable_gravatar = true
+# The load balancer terminates TLS and talks HTTP to this container, so the
+# cookie cannot be marked secure without breaking the session. Set it to true
+# the day Grafana is reached over HTTPS end to end.
 cookie_secure = false
 content_security_policy = true
 
@@ -21,3 +36,9 @@ enabled = false
 [analytics]
 reporting_enabled = false
 check_for_updates = false
+
+[unified_alerting]
+# vmalert evaluates the rules in alerts/ and notifies alertmanager directly.
+# Grafana's own alerting would be a second scheduler querying the same data
+# for the same answers, on a box with 768 MB for Grafana.
+enabled = false

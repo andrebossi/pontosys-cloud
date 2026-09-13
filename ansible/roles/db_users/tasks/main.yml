@@ -22,9 +22,6 @@
       keys/.env.example, then `source keys/.env`.
     quiet: true
 
-# The administrative credential is the one thing Terraform creates -- the DB
-# System cannot exist without it. It is also where host and port come from, so
-# where the database lives is never written down twice.
 - name: Administrative credential
   oracle.oci.oci_secrets_secret_bundle_facts:
     secret_name: "{{ secret_prefix }}-mysql-admin"
@@ -47,8 +44,6 @@
          | b64decode | from_json }}
   no_log: true
 
-# Read before minting. Creating unconditionally would add a version on every
-# run and rotate the password out from under the running applications.
 - name: Read the application credentials that exist
   oracle.oci.oci_secrets_secret_bundle_facts:
     secret_name: "{{ secret_prefix }}-{{ item.value.database.secret }}"
@@ -61,8 +56,7 @@
   loop_control:
     label: "{{ item.value.database.secret }}"
   register: app_bundles
-  # A name that is not there yet is the next task, not a failure.
-  failed_when: false
+  ignore_errors: true
   changed_when: false
   no_log: true
 
@@ -90,7 +84,6 @@
     loop_var: app_key
   when: db_rotate | bool
 
-# Every schema any application names, deduplicated.
 - name: Schemas
   ansible.mysql.mysql_db:
     login_host: "{{ db_admin.host }}"
@@ -115,18 +108,9 @@
     login_password: "{{ db_admin.password }}"
     name: "{{ dsn.username }}"
     host: "{{ dsn.host_acl }}"
-    # NOT `password:`. The module gives it precedence over `plugin` and
-    # silently creates a mysql_native_password account, which MySQL 8.4 no
-    # longer supports. `plugin` alone, with no auth string, creates a
-    # PASSWORDLESS account -- both are always set together.
     plugin: "{{ db_user_plugin }}"
     plugin_auth_string: "{{ dsn.password }}"
-    # Without a salt the module compares the stored hash against the plaintext,
-    # never matches, and re-issues ALTER USER on every converge.
     salt: "{{ ((dsn.password ~ item.key) | hash('sha256'))[:20] }}"
-    # One grant per schema the catalog lists. Recomputed in full, never
-    # appended: a schema dropped from the entry has to disappear from the
-    # server too.
     priv: >-
       {{ item.value.database.schemas.values() | unique | sort
          | map('regex_replace', '$', '.*')

@@ -26,8 +26,7 @@
     mode: "{{ item.mode | default('0750') }}"
   loop:
     - path: "{{ observability_dir }}"
-    # 472 is the grafana-oss uid in the official image; the bind mount needs
-    # to be writable by it for file-based logging to work.
+      mode: "0755"
     - path: "{{ grafana_log_dir }}"
       owner: "472"
       mode: "0755"
@@ -39,6 +38,19 @@
     mode: "0644"
     directory_mode: "0755"
   notify: restart observability
+
+# Both files below need these facts, so they are resolved first.
+- name: Grafana administrator password
+  ansible.builtin.include_tasks: secret.yml
+  vars:
+    monitoring_secret_name: grafana-admin
+    monitoring_secret_var: grafana_admin_password
+
+- name: Grafana secret key
+  ansible.builtin.include_tasks: secret.yml
+  vars:
+    monitoring_secret_name: grafana-secret-key
+    monitoring_secret_var: grafana_secret_key
 
 - name: grafana.ini
   ansible.builtin.template:
@@ -53,7 +65,7 @@
   ansible.builtin.template:
     src: env.j2
     dest: "{{ observability_dir }}/.env"
-    mode: "0600"
+    mode: "0655"
   no_log: true
   notify: restart observability
 

@@ -1,6 +1,7 @@
 ---
 observability_dir: /opt/observability
 grafana_log_dir: /var/log/grafana
+grafana_log_max_days: 7
 
 monitoring_mem_budget_mb: 6144
 
@@ -17,10 +18,10 @@ vmalert_mem_limit: 256M
 alertmanager_mem_limit: 192M
 grafana_mem_limit: 768M
 
-vm_max_disk: 20GB
-vm_retention: 3m
-vl_max_disk: 30GB
-vl_retention: 30d
+vm_min_free_disk: 10GB
+vm_retention: 10d
+vl_max_disk_pct: 80
+vl_retention: 10d
 
 fluentbit_backend_inputs:
   - name: prometheus_scrape

@@ -1,2 +1,4 @@
 ---
+oci_auth_type: instance_principal
+
 grafana_log_dir: /var/log/grafana

@@ -11,21 +11,17 @@ x-common: &common
 services:
   victoriametrics:
     <<: *common
-    image: victoriametrics/victoria-metrics:v1.111.0
+    image: victoriametrics/victoria-metrics:v1.151.0
     volumes:
       - vm-data:/storage
     command:
       - --storageDataPath=/storage
       - --httpListenAddr=:8428
-      - --retentionPeriod=${VM_RETENTION:-3m}
-      - --storage.maxDiskSpaceUsageBytes=${VM_MAX_DISK:-20GB}
-      # Mandatory. The default is -memory.allowedPercent=60, computed against
-      # the HOST's RAM, not the container limit -- see group_vars/role_monitoring.
+      - --retentionPeriod=${VM_RETENTION:-10d}
+      - --storage.minFreeDiskSpaceBytes=${VM_MIN_FREE_DISK:-10GB}
       - --memory.allowedBytes=${VM_MEM_ALLOWED:-1400MB}
       - --search.maxConcurrentRequests=${VM_MAX_QUERIES:-4}
       - --search.maxQueryDuration=30s
-      - --dedup.minScrapeInterval=15s
-      - --selfScrapeInterval=30s
       - --loggerLevel=WARN
     ports:
       - "127.0.0.1:8428:8428"
@@ -43,25 +39,19 @@ services:
 
   victorialogs:
     <<: *common
-    image: victoriametrics/victoria-logs:v1.9.1-victorialogs
+    image: victoriametrics/victoria-logs:v1.52.0
     volumes:
       - vl-data:/storage
     command:
       - --storageDataPath=/storage
       - --httpListenAddr=:9428
-      - --retentionPeriod=${VL_RETENTION:-30d}
-      - --retention.maxDiskSpaceUsageBytes=${VL_MAX_DISK:-30GB}
+      - --retentionPeriod=${VL_RETENTION:-10d}
+      - --retention.maxDiskUsagePercent=${VL_MAX_DISK_PCT:-80}
       - --memory.allowedBytes=${VL_MEM_ALLOWED:-1400MB}
       - --insert.maxFieldsPerLine=200
       - --loggerLevel=WARN
     ports:
       - "127.0.0.1:9428:9428"
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 30s
     deploy:
       resources:
         limits:
@@ -70,7 +60,7 @@ services:
 
   vmalert:
     <<: *common
-    image: victoriametrics/vmalert:v1.111.0
+    image: victoriametrics/vmalert:v1.151.0
     depends_on:
       victoriametrics:
         condition: service_healthy
@@ -81,7 +71,6 @@ services:
       - --remoteWrite.url=http://victoriametrics:8428
       - --remoteRead.url=http://victoriametrics:8428
       - --notifier.url=http://alertmanager:9093
-      # One glob per folder: alerts/app, alerts/host, alerts/monitoring.
       - --rule=/etc/alerts/app/*.yml
       - --rule=/etc/alerts/host/*.yml
       - --rule=/etc/alerts/monitoring/*.yml
@@ -98,7 +87,7 @@ services:
 
   alertmanager:
     <<: *common
-    image: prom/alertmanager:v0.28.0
+    image: prom/alertmanager:v0.34.0
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
       - am-data:/alertmanager
@@ -112,7 +101,7 @@ services:
 
   grafana:
     <<: *common
-    image: grafana/grafana-oss:11.6.1
+    image: grafana/grafana-oss:13.0.8
     depends_on:
       victoriametrics:
         condition: service_healthy
