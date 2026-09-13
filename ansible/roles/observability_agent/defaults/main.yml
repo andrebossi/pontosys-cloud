@@ -1,4 +1,6 @@
 ---
+fluentbit_bin: /opt/fluent-bit/bin/fluent-bit
+
 fluentbit_config_dir: /etc/fluent-bit
 fluentbit_state_dir: /var/lib/fluent-bit
 fluentbit_textfile_dir: /var/lib/node_exporter/textfile
@@ -14,9 +16,16 @@ fluentbit_http_port: 2020
 
 # Appended to the base lists below, never replacing them: Ansible replaces
 # same-named lists between groups and the loss would be silent.
+# Two independent slots, because Ansible REPLACES a same-named list between
+# groups rather than merging it. role_app fills _extra_, role_monitoring fills
+# _backend_, and a machine in both -- the local one-box setup -- gets both
+# instead of silently losing one.
 fluentbit_extra_inputs: []
 fluentbit_extra_filters: []
 fluentbit_extra_outputs: []
+fluentbit_backend_inputs: []
+fluentbit_backend_filters: []
+fluentbit_backend_outputs: []
 fluentbit_extra_files: []
 textfile_exporters: []
 

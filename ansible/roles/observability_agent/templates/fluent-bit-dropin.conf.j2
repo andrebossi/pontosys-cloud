@@ -23,7 +23,7 @@ EnvironmentFile=/run/instance.env
 # The packaged unit points at fluent-bit.conf in the classic format. Reset
 # first: systemd appends ExecStart= lines otherwise and refuses to start.
 ExecStart=
-ExecStart=/opt/fluent-bit/bin/fluent-bit -c {{ fluentbit_config_dir }}/fluent-bit.yaml
+ExecStart={{ fluentbit_bin }} -c {{ fluentbit_config_dir }}/fluent-bit.yaml
 
 Restart=always
 RestartSec=5

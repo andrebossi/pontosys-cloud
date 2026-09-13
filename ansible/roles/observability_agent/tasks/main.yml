@@ -114,7 +114,7 @@
     src: fluent-bit.yaml.j2
     dest: "{{ fluentbit_config_dir }}/fluent-bit.yaml"
     mode: "0644"
-    validate: "fluent-bit --dry-run -c %s"
+    validate: "{{ fluentbit_bin }} --dry-run -c %s"
   notify: reload fluent-bit
 
 - name: Agent is running

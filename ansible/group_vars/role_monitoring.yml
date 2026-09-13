@@ -22,13 +22,18 @@ vm_retention: 3m
 vl_max_disk: 30GB
 vl_retention: 30d
 
-fluentbit_extra_inputs:
+fluentbit_backend_inputs:
   - name: prometheus_scrape
     tag: backend_metrics
     host: 127.0.0.1
     port: 8428
     metrics_path: /metrics
     scrape_interval: 60s
+    processors: &backend_selector
+      metrics:
+        - name: metrics_selector
+          metric_name: /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
+          action: include
 
   - name: prometheus_scrape
     tag: backend_metrics
@@ -36,6 +41,7 @@ fluentbit_extra_inputs:
     port: 9428
     metrics_path: /metrics
     scrape_interval: 60s
+    processors: *backend_selector
 
   - name: prometheus_scrape
     tag: backend_metrics
@@ -43,13 +49,7 @@ fluentbit_extra_inputs:
     port: 8880
     metrics_path: /metrics
     scrape_interval: 60s
-
-fluentbit_extra_filters:
-  - name: metrics_selector
-    match: backend_metrics
-    metric_name: |
-      /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
-    action: include
+    processors: *backend_selector
 
 monitoring_host: 127.0.0.1
 

@@ -35,7 +35,7 @@ fluentbit_extra_inputs:
 fluentbit_extra_filters:
   - name: lua
     match: app.log
-    script: systemd_classify.lua
+    script: "{{ fluentbit_config_dir }}/systemd_classify.lua"
     call: classify
 
   - name: modify

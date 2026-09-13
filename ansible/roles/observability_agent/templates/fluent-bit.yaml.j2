@@ -4,7 +4,7 @@
 service:
   flush: 5
   log_level: info
-  parsers_file: parsers.yaml
+  parsers_file: {{ fluentbit_config_dir }}/parsers.yaml
   http_server: "on"
   http_listen: 127.0.0.1
   http_port: {{ fluentbit_http_port }}
@@ -24,8 +24,8 @@ service:
 
 pipeline:
   inputs:
-{{ (fluentbit_base_inputs + fluentbit_extra_inputs) | to_nice_yaml(indent=2) | indent(4, true) }}
+{{ (fluentbit_base_inputs + fluentbit_extra_inputs + fluentbit_backend_inputs) | to_nice_yaml(indent=2) | indent(4, true) }}
   filters:
-{{ (fluentbit_base_filters + fluentbit_extra_filters) | to_nice_yaml(indent=2) | indent(4, true) }}
+{{ (fluentbit_base_filters + fluentbit_extra_filters + fluentbit_backend_filters) | to_nice_yaml(indent=2) | indent(4, true) }}
   outputs:
-{{ (fluentbit_base_outputs + fluentbit_extra_outputs) | to_nice_yaml(indent=2) | indent(4, true) }}
+{{ (fluentbit_base_outputs + fluentbit_extra_outputs + fluentbit_backend_outputs) | to_nice_yaml(indent=2) | indent(4, true) }}
