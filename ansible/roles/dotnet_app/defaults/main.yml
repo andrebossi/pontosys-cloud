@@ -9,39 +9,50 @@ app_tiers: {}
 dotnet_runtime_env: {}
 app_settings_common: {}
 app_settings: {}
-app_secret_refs: {}
-db_servers: {}
-db_user_prefix: app_
-db_pool_max: 12
+
+# Which identity the controller uses to reach OCI. It runs on a workstation
+# today and on a VM inside the VCN later; instance_principal is the end state,
+# api_key is what env_local overrides it to.
+oci_auth_type: instance_principal
+
+# Every secret this host reads, by the short name the catalog uses. Both
+# sources are explicit entries in applications.yml -- nothing is derived from
+# an application's name, so `grep db-pixapi` finds every use of it.
+app_secret_names: >-
+  {{ (applications.values() | selectattr('database', 'defined')
+      | map(attribute='database.secret') | list)
+     + (applications.values() | selectattr('secrets', 'defined')
+        | map(attribute='secrets') | map('dict2items') | flatten
+        | map(attribute='value') | list) | unique }}
+
+# Where dotnet_runtime put the runtime. Needed here because a `--tags apps` run
+# never executes that role's tasks, so nothing else defines them. Keep in step
+# with roles/dotnet_runtime/defaults/main.yml.
+dotnet_root: /opt/dotnet
+dotnet_compat_dir: /opt/dotnet/compat
+# Fallback only: dotnet_runtime detects the host's real ICU and sets a fact
+# that outranks this. It matters when the runtime tasks are skipped.
+dotnet_host_icu_version: "74"
+
+# ASP.NET Core does not call sd_notify unless the app was built with
+# .UseSystemd(). Type=notify on an app that was not would make systemd wait out
+# TimeoutStartSec and then declare a working app failed.
+app_systemd_type: exec
 
 # AllowPublicKeyRetrieval is what makes caching_sha2_password work over a
 # plaintext connection: without it the handshake fails with "Authentication
 # method 'caching_sha2_password' failed" and it looks like a wrong password.
-# It sends the password RSA-encrypted rather than in the clear, which is
-# acceptable inside a private subnet -- enabling TLS on the DB system and
-# moving to SslMode=Required is the better end state.
+# It sends the password RSA-encrypted rather than in the clear -- enabling TLS
+# on the DB system and moving to SslMode=Required is the better end state.
 db_connection_options: >-
   persistsecurityinfo=True;SslMode=none;AllowPublicKeyRetrieval=True;
   Convert Zero Datetime=true;Maximum Pool Size={{ db_pool_max }};
 
-# ASP.NET Core does not call sd_notify unless the app was built with
-# .UseSystemd(). Type=notify on an app that was not would make systemd wait
-# out TimeoutStartSec and then declare a working app failed.
-app_systemd_type: exec
-
-
-# Set at the runtime layer; repeated so the role can be used on its own.
-dotnet_root: /opt/dotnet
-dotnet_compat_dir: /opt/dotnet/compat
-dotnet_host_icu_version: "74"
-
-# The ceiling for the group, derived from the shape. Everything outside
-# apps.slice -- kernel, nginx, the agent, and the page cache that keeps .dll
-# reads off the disk -- is what apps_slice_reserve_mb holds back.
-apps_slice_reserve_mb: 1600
+# The ceiling for the group, derived from the shape and from
+# apps_slice_reserve_mb, which group_vars sets per environment.
 apps_slice_memory_max: "{{ host_memory_mb - apps_slice_reserve_mb }}M"
 apps_slice_memory_high: "{{ ((host_memory_mb - apps_slice_reserve_mb) * 0.9) | int }}M"
 apps_slice_memory_swap_max: 1G
-# 85% of the box. The remaining 15% is what lets nginx answer and sshd accept
-# a login while the apps are pinned -- without it an incident is unreachable.
+# 85% of the box. The remaining 15% is what lets nginx answer and sshd accept a
+# login while the apps are pinned -- without it an incident is unreachable.
 apps_slice_cpu_quota: "{{ (host_vcpus * 100 * 0.85) | int }}%"

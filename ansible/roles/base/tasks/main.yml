@@ -14,19 +14,21 @@
   ansible.builtin.include_tasks: users.yml
 
 - name: Kernel tuning
-  ansible.posix.sysctl:
-    name: "{{ item.key }}"
-    value: "{{ item.value }}"
-    sysctl_file: /etc/sysctl.d/60-pscloud.conf
-    state: present
-    reload: true
-  loop: "{{ base_sysctl | dict2items }}"
-  loop_control:
-    label: "{{ item.key }} = {{ item.value }}"
+  ansible.builtin.copy:
+    dest: /etc/sysctl.d/60-pscloud.conf
+    mode: "0644"
+    content: |
+      # {{ ansible_managed }}
+      {% for k, v in base_sysctl.items() %}
+      {{ k }} = {{ v }}
+      {% endfor %}
+  register: sysctl_conf
 
-# `always` makes the kernel hand out 2 MB pages the .NET GC did not ask for;
-# on a 6 GB box that inflates the resident set and stalls on compaction.
-# `madvise` keeps the win where it is asked for and nowhere else.
+- name: Apply it
+  ansible.builtin.command: sysctl --system
+  when: sysctl_conf is changed
+  changed_when: true
+
 - name: Transparent hugepages on madvise
   ansible.builtin.copy:
     dest: /etc/systemd/system/thp-madvise.service
@@ -54,15 +56,14 @@
     state: started
     daemon_reload: true
 
-# The boot volume is paravirtualised and already queues on the hypervisor
-# side; a second scheduler in the guest only adds latency.
 - name: No guest I/O scheduler on virtual disks
   ansible.builtin.copy:
     dest: /etc/udev/rules.d/60-scheduler.rules
     mode: "0644"
     content: |
-      ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]n[0-9]", ATTR{queue/scheduler}="none"
-      ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]n[0-9]", ATTR{queue/read_ahead_kb}="256"
+      # vd* included: OCI presents sd*, libvirt presents vd*, and the rule
+      # silently matched nothing on the test VM without it.
+      ACTION=="add|change", KERNEL=="sd[a-z]|vd[a-z]|nvme[0-9]n[0-9]", ATTR{queue/scheduler}="none"
   register: io_rules
 
 - name: Apply it now
@@ -92,8 +93,6 @@
       {% endfor %}
   notify: restart journald
 
-# The OCI Ubuntu image ships an INPUT chain ending in REJECT. This is what
-# cloud-init used to do; it belongs with the rest of the host configuration.
 - name: Inbound ports
   ansible.builtin.iptables:
     chain: INPUT
@@ -112,9 +111,6 @@
   when: fw_rules is changed
   changed_when: true
 
-# Reads the instance metadata service into /run/instance.env, which every
-# agent unit sources: the OCI identity ends up on each metric and log line
-# without anything machine-specific being baked into the image.
 - name: OCI identity script
   ansible.builtin.copy:
     src: oci-instance-label.sh

@@ -1,20 +1,7 @@
 ---
-# The observability backend, in Docker Compose. Also the jump host and the
-# Ansible executor.
 observability_dir: /opt/observability
 grafana_log_dir: /var/log/grafana
 
-# The machine is 12 GB, arm64, and not dedicated to this -- RustDesk and a
-# desktop share it. 6 GB is allocated to the stack; the limits below sum to
-# 5.2 GB, leaving room for Docker's overhead and a restart overlapping a
-# running container. The rest of the box stays page cache, which is what
-# VictoriaMetrics and VictoriaLogs lean on hardest -- both are mmap-based.
-#
-# -memory.allowedBytes is mandatory on both: the default is computed against
-# the HOST's RAM, so inside a 2 GB container the process would believe it can
-# use 7.2 GB and get OOM-killed by the cgroup. Each is ~70% of its own limit.
-# Asserted against the sum of the container limits, so an edit that quietly
-# overcommits the machine fails the converge instead of the OOM killer.
 monitoring_mem_budget_mb: 6144
 
 vm_mem_limit: 2G
@@ -30,18 +17,11 @@ vmalert_mem_limit: 256M
 alertmanager_mem_limit: 192M
 grafana_mem_limit: 768M
 
-# Hard ceilings, not targets. Leave 20% of the filesystem free on top: without
-# scratch space for merges VictoriaMetrics drops into read-only mode.
 vm_max_disk: 20GB
 vm_retention: 3m
 vl_max_disk: 30GB
 vl_retention: 30d
 
-# monitoring_fqdn: grafana.example.com
-# grafana_admin_password: set this in host_vars with Ansible Vault.
-
-# The backends watch themselves. Without this, the day VictoriaMetrics fills
-# the disk is the day nobody finds out about anything.
 fluentbit_extra_inputs:
   - name: prometheus_scrape
     tag: backend_metrics
@@ -65,17 +45,12 @@ fluentbit_extra_inputs:
     scrape_interval: 60s
 
 fluentbit_extra_filters:
-  # A single /metrics endpoint yields ~1500 series. Only the ones that answer
-  # "is it up, does it have disk, is it ingesting" are kept.
   - name: metrics_selector
     match: backend_metrics
     metric_name: |
       /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
     action: include
 
-# On this VM the backends are local. Sending to 127.0.0.1 means the machine's
-# own telemetry does not depend on the network it is there to observe.
 monitoring_host: 127.0.0.1
 
-# Ingest from the fleet, and Grafana. Everything else stays closed.
 base_open_ports: [8428, 9428, 3000]

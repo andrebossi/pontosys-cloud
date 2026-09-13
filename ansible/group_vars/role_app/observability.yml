@@ -1,14 +1,7 @@
 ---
-# ===========================================================================
 # WHAT THIS VM SENDS
-#
-# Appended to roles/observability_agent's base collection. Adding a source is
-# one entry -- no task and no template change.
-# ===========================================================================
 fluentbit_extra_inputs:
 
-  # Application unit logs. The slice filter is the collection's identity:
-  # without Slice=apps.slice on the unit, an app runs but is invisible here.
   - name: systemd
     tag: app.log
     systemd_filter:
@@ -20,8 +13,6 @@ fluentbit_extra_inputs:
     storage.type: filesystem
     threaded: "on"
 
-  # nginx access log in JSON. This is the source of the access rate, the
-  # status-code breakdown and the latency histogram.
   - name: tail
     tag: nginx.access
     path: "{{ nginx_access_log }}"
@@ -33,9 +24,6 @@ fluentbit_extra_inputs:
     storage.type: filesystem
     threaded: "on"
 
-  # stub_status: active / accepted / handled connections and total requests.
-  # This is "nginx load" -- concurrency, as opposed to the request rate that
-  # comes out of the access log.
   - name: nginx_metrics
     tag: nginx_metrics
     host: 127.0.0.1
@@ -50,8 +38,6 @@ fluentbit_extra_filters:
     script: systemd_classify.lua
     call: classify
 
-  # `job` has to be a field on the record: VictoriaLogs builds the stream from
-  # _stream_fields, and Fluent Bit's http output has no `labels` parameter.
   - name: modify
     match: app.log
     add: job app
@@ -60,8 +46,6 @@ fluentbit_extra_filters:
     match: nginx.access
     add: job nginx
 
-  # Requests by app, status and method. stub_status has no status code, so
-  # without this there is no 5xx series and no app-down alert to build on.
   - name: log_to_metrics
     match: nginx.access
     tag: nginx_req_metrics
@@ -73,9 +57,6 @@ fluentbit_extra_filters:
       - status
       - method
 
-  # request_time is emitted unquoted (numeric) on purpose. upstream_time
-  # arrives quoted and can be empty or comma-separated when more than one
-  # upstream was tried -- unusable as a value_field.
   - name: log_to_metrics
     match: nginx.access
     tag: nginx_req_metrics
@@ -113,10 +94,6 @@ fluentbit_extra_outputs:
 fluentbit_extra_files:
   - systemd_classify.lua
 
-# Per-app memory, swap, CPU throttling and pressure, plus host swap and PSI.
-# node_exporter_metrics counts processes by state and nothing else, so without
-# this the per-app ceilings are unobservable -- and swap use and rising memory
-# pressure are what move BEFORE an OOM kill, not after it.
 textfile_exporters:
   - name: cgroup
     src: cgroup-textfile-exporter.sh

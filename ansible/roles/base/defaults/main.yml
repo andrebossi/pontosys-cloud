@@ -50,39 +50,51 @@ base_users:
 
 # ---------------------------------------------------------------------------
 # KERNEL TUNING
+#
+# Only settings that are safe regardless of traffic shape. Each one is either
+# a LIMIT the workload provably reaches, or a default that is wrong for a
+# reverse proxy in front of loopback services.
+#
+# Deliberately absent, and why -- these were here and were removed:
+#
+#   tcp_congestion_control=bbr   BBR is a win on long, lossy paths. This one
+#     default_qdisc=fq           is a private subnet at sub-millisecond RTT,
+#                                where it is a wash, and the sysctl FAILS
+#                                outright if tcp_bbr is not loaded.
+#   vfs_cache_pressure=150       reclaims dentry/inode cache harder. A host
+#                                that opens hundreds of assemblies and
+#                                thousands of static files wants that cache
+#                                kept, not dropped.
+#   dirty_ratio / _background    writeback tuning is workload-shaped. The
+#                                defaults are not wrong here, and guessing
+#                                trades a stall you can see for one you
+#                                cannot.
+#   tcp_fin_timeout=15           cargo cult. 60s is not what exhausts this box.
+#   tcp_mtu_probing=1            only earns its place behind a PMTU blackhole.
 # ---------------------------------------------------------------------------
 base_sysctl:
   # A .NET process reserves far more virtual address space than it touches.
   # Strict accounting (0) refuses those reservations and the runtime aborts.
   vm.overcommit_memory: "1"
+  # Swap is the OOM backstop, not a tier to run from. The default 60 pages out
+  # idle Kestrel heaps and the first request after a quiet spell pays for it.
   vm.swappiness: "{{ swap_swappiness }}"
-  # Reclaim dentry/inode cache earlier: on a 6 GB box the page cache the apps
-  # need loses to metadata cache otherwise.
-  vm.vfs_cache_pressure: "150"
-  # Nine runtimes, each mapping hundreds of assemblies. The default 65530 is
-  # reached long before memory is.
+  # Every runtime maps hundreds of assemblies. The default 65530 is reached
+  # long before memory is, and the failure reads as a bad_alloc.
   vm.max_map_count: "262144"
-  # One boot volume, no write cache to hide behind: flush early and often so
-  # writeback never stalls a request for seconds at a time.
-  vm.dirty_background_ratio: "5"
-  vm.dirty_ratio: "15"
 
-  # nginx accept queue.
+  # The accept queue nginx drains. The default is 4096 on this kernel already;
+  # pinned so a future default does not move it quietly.
   net.core.somaxconn: "4096"
   net.ipv4.tcp_max_syn_backlog: "4096"
-  # Nine Kestrel upstreams plus load-balancer keepalives: TIME_WAIT sockets
-  # get reused instead of exhausting the ephemeral range.
-  net.ipv4.tcp_tw_reuse: "1"
+  # Outbound sockets: nginx to Kestrel, and the apps to MySQL.
   net.ipv4.ip_local_port_range: "10240 65535"
-  net.ipv4.tcp_fin_timeout: "15"
+  # Client-side only since 4.12, and this box is the client on every
+  # connection it opens.
+  net.ipv4.tcp_tw_reuse: "1"
   # Keepalive upstreams idle between bursts. Without this the kernel resets
-  # the congestion window on every idle gap and the first request pays for it.
+  # the congestion window on every gap and the next request pays for it.
   net.ipv4.tcp_slow_start_after_idle: "0"
-  net.ipv4.tcp_mtu_probing: "1"
-  # BBR plus fq: the throughput and latency win on the load balancer path,
-  # and both are in-tree on Ubuntu 24.04.
-  net.core.default_qdisc: fq
-  net.ipv4.tcp_congestion_control: bbr
 
   fs.file-max: "200000"
   fs.inotify.max_user_instances: "512"

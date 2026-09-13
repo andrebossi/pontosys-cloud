@@ -73,39 +73,6 @@ resource "oci_vault_secret" "db_admin" {
   freeform_tags = var.freeform_tags
 }
 
-resource "random_password" "app_db" {
-  for_each = var.applications
-
-  length           = 28
-  special          = true
-  override_special = "!#%*+-=?_"
-}
-
-resource "oci_vault_secret" "app_db" {
-  for_each = var.applications
-
-  compartment_id = var.compartment_id
-  vault_id       = oci_kms_vault.this.id
-  key_id         = oci_kms_key.this.id
-  secret_name    = "${var.label_prefix}-db-${each.key}"
-  description    = "MariaDB credential for application ${each.key}"
-
-  secret_content {
-    content_type = "BASE64"
-    content = base64encode(jsonencode({
-      host     = var.db_private_ip
-      port     = 3306
-      database = each.value.db_name
-      username = each.value.db_user
-      password = random_password.app_db[each.key].result
-      grants   = each.value.grants
-      host_acl = each.value.db_host
-    }))
-  }
-
-  freeform_tags = var.freeform_tags
-}
-
 resource "oci_bastion_bastion" "this" {
   count = var.bastion_target_subnet_id == "" ? 0 : 1
 
@@ -116,47 +83,4 @@ resource "oci_bastion_bastion" "this" {
   client_cidr_block_allow_list = var.admin_cidrs
 
   freeform_tags = var.freeform_tags
-}
-data "oci_objectstorage_namespace" "this" {
-  compartment_id = var.compartment_id
-}
-
-resource "oci_objectstorage_bucket" "backups" {
-  compartment_id = var.compartment_id
-  namespace      = data.oci_objectstorage_namespace.this.namespace
-  name           = "${var.label_prefix}-artifacts"
-
-  access_type   = "NoPublicAccess"
-  storage_tier  = "Standard"
-  kms_key_id    = oci_kms_key.this.id
-  freeform_tags = var.freeform_tags
-
-  versioning = "Enabled"
-
-  object_events_enabled = true
-
-  dynamic "retention_rules" {
-    for_each = var.immutable_retention_days > 0 ? [1] : []
-    content {
-      display_name = "worm-${var.immutable_retention_days}d"
-      duration {
-        time_amount = var.immutable_retention_days
-        time_unit   = "DAYS"
-      }
-    }
-  }
-}
-
-resource "oci_objectstorage_object_lifecycle_policy" "backups" {
-  bucket    = oci_objectstorage_bucket.backups.name
-  namespace = data.oci_objectstorage_namespace.this.namespace
-
-  rules {
-    name        = "archive-old"
-    action      = "ARCHIVE"
-    time_amount = var.backup_retention.archive_after_days
-    time_unit   = "DAYS"
-    is_enabled  = true
-    target      = "objects"
-  }
 }

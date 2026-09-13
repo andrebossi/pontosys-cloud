@@ -10,18 +10,8 @@
   serial: 1
   roles:
     - { role: base, tags: [base] }
-    - { role: pscloud, tags: [cli] }
     - { role: dotnet_runtime, tags: [runtime] }
     - { role: nginx_app, tags: [nginx] }
     - { role: dotnet_app, tags: [apps] }
     - { role: app_deploy, tags: [apps, deploy] }
     - { role: observability_agent, tags: [agent] }
-
-- name: Database accounts
-  hosts: role_app
-  become: true
-  gather_facts: false
-  tags: [db]
-  tasks:
-    - ansible.builtin.include_role: { name: db_users }
-      run_once: true

@@ -14,22 +14,71 @@
     label: "{{ item.key }}"
   register: settings
 
-- name: Secret environment templates
+- name: Vault is configured
+  ansible.builtin.assert:
+    that: oci_vault_id | default('') | length > 0
+    fail_msg: >-
+      oci_vault_id is empty, so the {{ app_secret_names | length }} secrets this
+      host needs cannot be read. It comes from OCI_VAULT_OCID; see
+      keys/.env.example, then `source keys/.env`.
+    quiet: true
+
+# Read once per name, by the short name the catalog uses. The <secret_prefix>-
+# half is added here and nowhere else, so the catalog stays the same in every
+# environment and a vault name is greppable.
+#
+# stage: CURRENT is what makes rotation work: a new version in the vault is
+# picked up by the next converge.
+- name: Secrets
+  oracle.oci.oci_secrets_secret_bundle_facts:
+    secret_name: "{{ secret_prefix }}-{{ item }}"
+    vault_id: "{{ oci_vault_id }}"
+    stage: CURRENT
+    auth_type: "{{ oci_auth_type }}"
+  delegate_to: localhost
+  become: false
+  loop: "{{ app_secret_names }}"
+  register: bundles
+  changed_when: false
+  # getByName takes seconds a call and intermittently answers 404 for a name
+  # that exists, which is what throttling looks like on this endpoint.
+  retries: 5
+  delay: 15
+  until: bundles is succeeded
+  no_log: true
+
+# Keyed by the SHORT name the catalog uses, so the template reads
+# secret_values['db-pixapi'] and nothing has to be assembled there.
+- name: Values
+  ansible.builtin.set_fact:
+    secret_values: >-
+      {{ dict(app_secret_names | zip(bundles.results
+              | map(attribute='secret_bundle.secret_bundle_content.content')
+              | map('b64decode'))) }}
+  no_log: true
+
+- name: Secret versions in use
+  ansible.builtin.debug:
+    msg: >-
+      {{ dict(app_secret_names | zip(bundles.results
+              | map(attribute='secret_bundle.version_number'))) }}
+
+# Written straight out, with the values in it. There is no .env.template and
+# no resolver unit: Ansible has the values, so Ansible writes the file. 0640
+# root:dotnetapp is the only place on the machine a password appears, and
+# `systemctl show` does not print it -- EnvironmentFile is read by PID 1.
+- name: Environment files
   ansible.builtin.template:
     src: app.env.j2
-    dest: "{{ app_config_dir }}/{{ item.key }}.env.template"
+    dest: "{{ app_config_dir }}/{{ item.key }}.env"
+    owner: root
+    group: "{{ app_deploy_user }}"
     mode: "0640"
   loop: "{{ applications | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
-  register: templates
-
-# Fills in every @@secret@@ from the vault. The same command runs at boot on a
-# pool member, which is what lets the image carry no credential.
-- name: Resolve them
-  ansible.builtin.command: "/usr/local/bin/pscloud env {{ app_config_dir }}"
-  when: not app_bake | bool
-  changed_when: true
+  register: envfiles
+  no_log: true
 
 - name: Applications are enabled
   ansible.builtin.systemd:
@@ -41,7 +90,6 @@
     label: "{{ item.key }}"
 
 - name: Restart what changed
-  when: not app_bake | bool
   block:
     # An application with no `current` symlink has never been deployed; its
     # unit fails AssertPathExists on purpose and is left alone.
@@ -57,7 +105,7 @@
       ansible.builtin.set_fact:
         deployed: "{{ current.results | selectattr('stat.exists') | map(attribute='item.key') | list }}"
         changed_apps: >-
-          {{ (settings.results + templates.results + runtime_dropin.results + limits_dropin.results)
+          {{ (settings.results + envfiles.results + runtime_dropin.results + limits_dropin.results)
              | selectattr('changed') | map(attribute='item.key') | unique | list }}
 
     - name: Running

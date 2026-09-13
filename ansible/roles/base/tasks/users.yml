@@ -20,8 +20,6 @@
     append: true
     shell: /bin/bash
     create_home: true
-    # No password, ever: these are key-only accounts. An unset password with
-    # PasswordAuthentication on would let anyone in, so it is explicitly locked.
     password: "!"
     password_lock: true
   loop: "{{ base_users | dict2items }}"
@@ -42,8 +40,6 @@
   ansible.builtin.copy:
     dest: "/etc/sudoers.d/10-{{ item.key }}"
     mode: "0440"
-    # visudo -cf: a malformed file here locks every account out of sudo, and
-    # the failure only shows up the next time someone needs it.
     validate: "visudo -cf %s"
     content: |
       # {{ ansible_managed }}

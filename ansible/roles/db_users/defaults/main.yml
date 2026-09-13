@@ -1,19 +1,46 @@
 ---
 applications: {}
-db_servers: {}
-db_user_prefix: app_
-# The app subnet is 10.20.16.0/20; a MySQL host pattern cannot express that
-# exactly, and this is far tighter than the '%' a hand-made account gets.
+oci_auth_type: instance_principal
+
+# Which applications this role touches: the ones whose catalog entry has a
+# `database:` block. That entry names the secret and the schemas, so there is
+# no second list anywhere.
+db_apps: >-
+  {{ applications | dict2items | selectattr('value.database', 'defined') | list }}
+
+db_secret_length: 32
+# Terraform's convention, kept so an account created before this is the same
+# account afterwards.
+db_user_suffix: _app
+# Which addresses an account may connect from. The app subnet is 10.20.16.0/20,
+# which a MySQL host pattern cannot express exactly; far tighter than the '%'
+# a hand-made account gets.
 db_user_host: "10.20.%"
+# What tells `prune` which logins it may consider, so an operator or
+# replication account is never in scope.
+db_user_pattern: "%_app"
+
 # MySQL 8.4 no longer ships mysql_native_password.
 db_user_plugin: caching_sha2_password
-db_privileges_default: SELECT,INSERT,UPDATE,DELETE,EXECUTE
 
-# MySQL accepts a grant on a schema that does not exist yet, so accounts can
-# be in place long before any data is.
+# What an account gets on its schemas. DROP, ALTER and CREATE are absent: a
+# schema change is a migration, run deliberately.
+db_privileges_default: SELECT,INSERT,UPDATE,DELETE
+# Per-schema override. cep is Brazilian postal codes, loaded out of band --
+# nothing in the fleet writes it.
+db_schema_privileges:
+  cep: SELECT
+
+# MySQL accepts a grant on a schema that does not exist yet, so accounts can be
+# in place long before any data is.
 db_create_schemas: false
 db_schema_encoding: utf8mb4
 db_schema_collation: utf8mb4_unicode_ci
+
+# Mint a new VERSION of every credential and move MySQL onto it in the same
+# run. The applications keep the previous password until the next
+# `site.yml --tags apps`, so run that straight after -- see database.yml.
+db_rotate: false
 
 # Off by default: it deletes credentials, and a --limit or a half-written
 # catalog would make it delete the wrong ones.

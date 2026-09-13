@@ -8,16 +8,6 @@
     create_home: false
     password_lock: true
 
-# ops reads the release trees to see what is actually deployed.
-- name: ops can read the application trees
-  ansible.posix.acl:
-    path: "{{ app_deploy_root }}"
-    entity: ops
-    etype: user
-    permissions: rx
-    default: true
-    state: present
-
 - name: Base directories
   ansible.builtin.file:
     path: "{{ item.path }}"
@@ -31,6 +21,15 @@
     - { path: "{{ app_config_dir }}", group: "{{ app_deploy_user }}", mode: "0750" }
     - { path: "{{ app_dumps_dir }}", owner: "{{ app_deploy_user }}", group: "{{ app_deploy_user }}" }
 
+- name: ops can read the application trees
+  ansible.posix.acl:
+    path: "{{ app_deploy_root }}"
+    entity: ops
+    etype: user
+    permissions: rx
+    default: true
+    state: present
+
 - name: Per-application directories
   ansible.builtin.file:
     path: "{{ app_deploy_root }}/{{ item.0.key }}/{{ item.1 }}"
@@ -42,8 +41,6 @@
   loop_control:
     label: "{{ item.0.key }}/{{ item.1 }}"
 
-# State that outlives a release: client certificates, generated reports,
-# fiscal tables. Created here so the first deploy has something to link to.
 - name: Persistent state directories
   ansible.builtin.file:
     path: "{{ app_deploy_root }}/{{ item.0.key }}/shared/{{ item.1 }}"
@@ -78,10 +75,6 @@
   loop_control:
     label: "{{ item.key }}"
 
-# Two drop-ins on purpose: 10 is what makes it THIS application (which
-# runtime, which assembly, what it may write to), 20 is what makes it this
-# SIZE. Retuning a limit never risks touching the runtime wiring, and
-# `systemctl cat` shows which file every directive came from.
 - name: Runtime drop-in
   ansible.builtin.template:
     src: runtime.conf.j2
@@ -103,32 +96,3 @@
     label: "{{ item.key }}"
   register: limits_dropin
   notify: reload systemd
-
-
-# On a machine nobody converged -- a pool member from the golden image -- this
-# is what fills in the env files before the applications start.
-- name: Secret resolver unit
-  ansible.builtin.copy:
-    dest: /etc/systemd/system/pscloud-env.service
-    mode: "0644"
-    content: |
-      [Unit]
-      Description=Resolve application secrets from OCI Vault
-      After=network-online.target
-      Wants=network-online.target
-      Before=dotnet-app@.service
-
-      [Service]
-      Type=oneshot
-      RemainAfterExit=yes
-      ExecStart=/usr/local/bin/pscloud env {{ app_config_dir }}
-
-      [Install]
-      WantedBy=multi-user.target
-  notify: reload systemd
-
-- name: Secret resolver runs at boot
-  ansible.builtin.systemd:
-    name: pscloud-env.service
-    enabled: true
-    daemon_reload: true

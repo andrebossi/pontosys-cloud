@@ -4,6 +4,5 @@
   become: true
   roles:
     - { role: base, tags: [base] }
-    - { role: pscloud, tags: [cli] }
     - { role: monitoring_stack, tags: [stack] }
     - { role: observability_agent, tags: [agent] }

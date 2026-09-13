@@ -1,6 +1,11 @@
 ---
-# Runs from an application VM: the NSG only lets the app tier reach 3306.
-# One host is enough -- the accounts are server-side -- so callers use run_once.
+# Schemas, accounts and the credentials behind them. Runs from an application
+# VM because the NSG only lets the app tier reach 3306, and once, because the
+# accounts are server-side.
+#
+# Everything it needs is the `database:` block in each catalog entry: the vault
+# name, and the schemas the account may reach. Nothing is derived from an
+# application's name.
 
 - name: MySQL client library
   ansible.builtin.apt:
@@ -9,48 +14,96 @@
     update_cache: true
     cache_valid_time: 3600
 
-- name: Applications that talk to a database
-  ansible.builtin.set_fact:
-    db_apps: >-
-      {{ applications | dict2items | rejectattr('value.connections', 'undefined')
-         | rejectattr('value.connections', 'eq', {}) | list }}
+- name: Vault is configured
+  ansible.builtin.assert:
+    that: oci_vault_id | default('') | length > 0
+    fail_msg: >-
+      oci_vault_id is empty. It comes from OCI_VAULT_OCID; see
+      keys/.env.example, then `source keys/.env`.
+    quiet: true
 
-# One call per credential. `pscloud secret` generates and stores a 32-character
-# password the first time a name is asked for, and reads it back after.
-- name: Passwords, from the vault
-  ansible.builtin.command: "/usr/local/bin/pscloud secret {{ secret_prefix }}-db-{{ db_user_prefix }}{{ item.key }}"
+# The administrative credential is the one thing Terraform creates -- the DB
+# System cannot exist without it. It is also where host and port come from, so
+# where the database lives is never written down twice.
+- name: Administrative credential
+  oracle.oci.oci_secrets_secret_bundle_facts:
+    secret_name: "{{ secret_prefix }}-mysql-admin"
+    vault_id: "{{ oci_vault_id }}"
+    stage: CURRENT
+    auth_type: "{{ oci_auth_type }}"
+  delegate_to: localhost
+  become: false
+  register: admin_bundle
+  changed_when: false
+  retries: 5
+  delay: 15
+  until: admin_bundle is succeeded
+  no_log: true
+
+- name: Administrative connection
+  ansible.builtin.set_fact:
+    db_admin: >-
+      {{ admin_bundle.secret_bundle.secret_bundle_content.content
+         | b64decode | from_json }}
+  no_log: true
+
+# Read before minting. Creating unconditionally would add a version on every
+# run and rotate the password out from under the running applications.
+- name: Read the application credentials that exist
+  oracle.oci.oci_secrets_secret_bundle_facts:
+    secret_name: "{{ secret_prefix }}-{{ item.value.database.secret }}"
+    vault_id: "{{ oci_vault_id }}"
+    stage: CURRENT
+    auth_type: "{{ oci_auth_type }}"
+  delegate_to: localhost
+  become: false
   loop: "{{ db_apps }}"
   loop_control:
-    label: "{{ db_user_prefix }}{{ item.key }}"
-  register: pw
+    label: "{{ item.value.database.secret }}"
+  register: app_bundles
+  # A name that is not there yet is the next task, not a failure.
+  failed_when: false
   changed_when: false
   no_log: true
 
-- name: Admin password, from the vault
-  ansible.builtin.command: "/usr/local/bin/pscloud secret {{ secret_prefix }}-db-admin"
-  register: admin_pw
-  changed_when: false
-  no_log: true
-
-- name: Credentials
+- name: What came back
   ansible.builtin.set_fact:
-    db_app_passwords: "{{ dict(db_apps | map(attribute='key') | zip(pw.results | map(attribute='stdout') | map('trim'))) }}"
-    db_admin_password: "{{ admin_pw.stdout | trim }}"
+    db_secrets: >-
+      {{ dict(app_bundles.results | rejectattr('failed') | map(attribute='item.key')
+              | zip(app_bundles.results | rejectattr('failed')
+                    | map(attribute='secret_bundle.secret_bundle_content.content')
+                    | map('b64decode') | map('from_json'))) }}
+    missing_apps: >-
+      {{ app_bundles.results | selectattr('failed') | map(attribute='item.key') | list }}
   no_log: true
 
+- name: Mint the ones that do not exist
+  ansible.builtin.include_tasks: credential.yml
+  loop: "{{ missing_apps }}"
+  loop_control:
+    loop_var: app_key
+
+- name: Rotate
+  ansible.builtin.include_tasks: credential.yml
+  loop: "{{ db_apps | map(attribute='key') | difference(missing_apps) }}"
+  loop_control:
+    loop_var: app_key
+  when: db_rotate | bool
+
+# Every schema any application names, deduplicated.
 - name: Schemas
   ansible.mysql.mysql_db:
     login_host: "{{ db_admin.host }}"
     login_port: "{{ db_admin.port }}"
     login_user: "{{ db_admin.username }}"
-    login_password: "{{ db_admin_password }}"
-    name: "{{ item.value.database }}"
+    login_password: "{{ db_admin.password }}"
+    name: "{{ item }}"
     encoding: "{{ db_schema_encoding }}"
     collation: "{{ db_schema_collation }}"
     state: present
-  loop: "{{ db_servers | dict2items }}"
-  loop_control:
-    label: "{{ item.value.database }}"
+  loop: >-
+    {{ db_apps | map(attribute='value.database.schemas')
+       | map('dict2items') | flatten | map(attribute='value') | unique | list }}
   when: db_create_schemas | bool
   no_log: true
 
@@ -59,44 +112,41 @@
     login_host: "{{ db_admin.host }}"
     login_port: "{{ db_admin.port }}"
     login_user: "{{ db_admin.username }}"
-    login_password: "{{ db_admin_password }}"
-    name: "{{ db_user_prefix }}{{ item.key }}"
-    host: "{{ db_user_host }}"
+    login_password: "{{ db_admin.password }}"
+    name: "{{ dsn.username }}"
+    host: "{{ dsn.host_acl }}"
     # NOT `password:`. The module gives it precedence over `plugin` and
     # silently creates a mysql_native_password account, which MySQL 8.4 no
     # longer supports. `plugin` alone, with no auth string, creates a
     # PASSWORDLESS account -- both are always set together.
     plugin: "{{ db_user_plugin }}"
-    plugin_auth_string: "{{ db_app_passwords[item.key] }}"
+    plugin_auth_string: "{{ dsn.password }}"
     # Without a salt the module compares the stored hash against the plaintext,
     # never matches, and re-issues ALTER USER on every converge.
-    salt: "{{ ((db_app_passwords[item.key] ~ item.key) | hash('sha256'))[:20] }}"
-    # Recomputed in full, never appended: a privilege dropped from the catalog
-    # has to actually disappear from the server.
-    priv: "{{ app_priv }}"
+    salt: "{{ ((dsn.password ~ item.key) | hash('sha256'))[:20] }}"
+    # One grant per schema the catalog lists. Recomputed in full, never
+    # appended: a schema dropped from the entry has to disappear from the
+    # server too.
+    priv: >-
+      {{ item.value.database.schemas.values() | unique | sort
+         | map('regex_replace', '$', '.*')
+         | zip(item.value.database.schemas.values() | unique | sort
+               | map('extract', db_schema_privileges) | map('default', db_privileges_default))
+         | map('join', ':') | join('/') }}
     append_privs: false
     state: present
   vars:
-    app_priv: >-
-      {%- set parts = [] -%}
-      {%- set overrides = item.value.db_privileges | default({}) -%}
-      {%- for srv in item.value.connections.values() | unique | sort -%}
-      {%- set grant = overrides.get(srv, db_servers[srv].privileges
-                                    | default(db_privileges_default)) -%}
-      {%- set _ = parts.append(db_servers[srv].database ~ '.*:' ~ grant) -%}
-      {%- endfor -%}
-      {{ parts | join('/') }}
+    dsn: "{{ db_secrets[item.key] }}"
   loop: "{{ db_apps }}"
   loop_control:
-    label: "{{ db_user_prefix }}{{ item.key }}"
+    label: "{{ item.key }}"
   no_log: true
 
 - name: Accounts and grants
   ansible.builtin.debug:
     msg: >-
-      {{ db_user_prefix }}{{ item.key }}@{{ db_user_host }} :
-      {{ item.value.connections.values() | unique | sort
-         | map('extract', db_servers, 'database') | join(', ') }}
+      {{ db_secrets[item.key].username }}@{{ db_secrets[item.key].host_acl }} :
+      {{ item.value.database.schemas.values() | unique | sort | join(', ') }}
   loop: "{{ db_apps }}"
   loop_control:
     label: "{{ item.key }}"
@@ -104,4 +154,3 @@
 - name: Prune accounts no application claims
   ansible.builtin.include_tasks: prune.yml
   when: db_remove_unknown_users | bool
-

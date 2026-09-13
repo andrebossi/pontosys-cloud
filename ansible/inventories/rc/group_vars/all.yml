@@ -1,0 +1,10 @@
+---
+app_env: rc
+
+host_vcpus: 2
+host_memory_mb: 6144
+apps_slice_reserve_mb: 1600
+
+oci_auth_type: instance_principal
+
+db_create_schemas: false

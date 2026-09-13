@@ -5,21 +5,169 @@ Eight .NET 5 applications behind a local nginx on `VM.Standard.E4.Flex`
 is a new machine image, not a machine that was changed.
 
 ```
-site.yml         the application servers, end to end
-monitoring.yml   the monitoring server
-deploy.yml       install the application versions on existing machines
-image.yml        the golden image, run by Packer
+site.yml                     the application servers, end to end
+database.yml                 schemas, MySQL accounts and the credentials
+monitoring.yml               the monitoring server
+deploy.yml                   application versions on existing machines
+image.yml                    the golden image, run by Packer
+
+group_vars/                  SHARED — identical in every environment
+inventories/production/      prod: hosts + the vars only prod has
+inventories/rc/              rc: production machines taking real traffic
+inventories/local/           Vagrant VMs on the workstation
+roles/
 ```
+
+**Every variable is defined in exactly one place.** Shared config never names a
+value an environment overrides, so there is no precedence chain to reason about
+when something looks wrong — there is one file to open. What differs between
+environments is only:
+
+```
+app_env  host_vcpus  host_memory_mb  apps_slice_reserve_mb
+oci_auth_type  db_create_schemas
+```
+
+prod and rc share a compartment, so each inventory *filters* on the
+`pscloud.environment` tag rather than querying separately. Running against the
+wrong environment is impossible by construction, not by remembering `--limit`.
+
+---
+
+## Install
+
+Python 3.11+, and that is the only thing you need beforehand. Everything else
+lands in this directory and nothing is installed system-wide.
+
+```sh
+cd ansible
+
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt     # ansible + the oci SDK
+.venv/bin/ansible-galaxy install -r requirements.yml
+```
+
+The second command reads **both** keys in `requirements.yml` — collections into
+`collections/`, the one external role into `roles/`. Both are gitignored.
+
+`requirements.txt` pins three things:
+
+| | why |
+|---|---|
+| `ansible` / `ansible-core` | pinned so a play that works here works on the runner |
+| `oci` | the SDK the `oracle.oci` modules and the dynamic inventory need |
+
+The `oci` SDK is on the **controller**, not on the machines. Secrets and
+artifacts are read by the controller and handed over; nothing OCI-aware is
+installed on a target.
+
+Put the venv on your PATH for the session, or prefix every command with
+`.venv/bin/`:
+
+```sh
+source .venv/bin/activate
+```
+
+## Set up
+
+### 1. Credentials
+
+```sh
+cp ../keys/.env.example ../keys/.env
+$EDITOR ../keys/.env
+source ../keys/.env
+```
+
+Three variables decide whether anything works: `OCI_COMPARTMENT_OCID`,
+`OCI_VAULT_OCID`, `OCI_VAULT_KEY_OCID`. They come from
+`terragrunt output` on `infra/live/<env>/platform`.
+
+The controller authenticates to OCI either with `~/.oci/config` (a workstation)
+or with its instance principal (a VM inside the VCN). That is what
+`oci_auth_type` selects, and it is the entire local/cloud delta:
+
+```yaml
+# inventories/local/group_vars/all.yml
+oci_auth_type: api_key          # prod and rc use instance_principal
+```
+
+### 2. What must already be in the vault
+
+Read **[REQUIREMENTS.md](REQUIREMENTS.md)** before the first run. Short version:
+`pscloud-mysql-admin` comes from Terraform, the names under `secrets:` in the
+catalog you create by hand, and the ones under `database.secret` are minted by
+`database.yml` on its first run.
+
+```sh
+oci secrets secret-bundle get-secret-bundle-by-name \
+  --secret-name pscloud-mysql-admin --vault-id "$OCI_VAULT_OCID" \
+  --query 'data."version-number"' --raw-output
+```
+
+### 3. Inventory
+
+There is **no default inventory**: `-i` is required. prod and rc share a
+compartment, so a run without it would go to whichever the default happened to
+name.
+
+```sh
+ansible-inventory -i inventories/production --graph
+ansible-inventory -i inventories/local --graph
+```
+
+Pass the *directory*, not the file — that is what loads
+`inventories/<env>/group_vars/` alongside the hosts.
+
+Grouping comes from the defined tags Terraform applies, the same tags that
+drive the IAM dynamic groups. `inventories/local/hosts.yml` is static; put the
+real addresses in it. Hostnames **are** addresses everywhere, matching the OCI
+plugin's `hostname_format: private_ip`, so `monitoring_host` resolves the same
+way in all three.
+
+## Run
+
+```sh
+source ../keys/.env
+export ENV=production          # or rc, or local
+
+ansible-playbook -i inventories/$ENV database.yml    # once, and when the
+                                                     # catalog's database: changes
+ansible-playbook -i inventories/$ENV site.yml
+ansible-playbook -i inventories/$ENV monitoring.yml
+```
+
+Order matters on a clean environment: `database.yml` mints the credentials that
+`site.yml` writes into the env files.
+
+```sh
+ansible-playbook -i inventories/production site.yml --check --diff
+ansible-playbook -i inventories/production site.yml --tags nginx
+ansible-playbook -i inventories/rc deploy.yml
+ansible-playbook -i inventories/production deploy.yml -e deploy_serial=25%
+```
+
+Tags: `base`, `runtime`, `nginx`, `apps`, `deploy`, `agent`.
+
+Locally, everything is the same except the inventory and the user — the first
+run connects as the image's own user because `roles/base` has not created the
+accounts yet:
+
+```sh
+ansible-playbook -i inventories/local site.yml -u ubuntu
+```
+
+---
+
+## Roles
 
 | Role | Owns |
 |---|---|
 | `base` | accounts and sudo, sysctl, swap, journald, firewall, OCI identity |
-| `pscloud` | the `pscloud` CLI: artifacts out of the bucket, secrets out of the vault |
 | `dotnet_runtime` | the .NET 5 and 2.1 runtimes, OpenSSL 1.1, libgdiplus, the report fonts |
-| `dotnet_app` | the systemd slice, unit template, drop-ins, settings, env templates |
+| `dotnet_app` | the systemd slice, unit template, drop-ins, settings, env files |
 | `app_deploy` | fetch a version, switch, health-check, roll back |
 | `nginx_app` | nginx, routing, error pages, the web root |
-| `db_users` | one MySQL account per application |
+| `db_users` | schemas, one MySQL account per application, and their credentials |
 | `observability_agent` | Fluent Bit: unit logs, host and per-app metrics |
 | `monitoring_stack` | Docker and the observability backend |
 
@@ -38,31 +186,31 @@ applications:
     path: /pixapi
     tier: critical
     linked_dirs: [Contents]
-    connections: {}
+
+  virtualstore:
+    # ... and an application that talks to a database and reads a secret:
+    database:
+      secret: db-virtualstore        # the vault name, without the prefix
+      schemas:
+        VSGlobalContext: virtualstoreglobal
+        CepContext: cep
+    secrets:
+      SmtpClientData__MailPass: smtp-password
 
 webroot_version: "2026.09.12"
 ```
 
+**Every secret an application uses is named in its own entry.** Nothing is
+derived from the application's name, so `grep db-virtualstore` finds every use
+of it, and the `<prefix>-` half is added in one place — the catalog is the same
+in every environment.
+
 Releasing is: CI uploads a tarball, someone bumps the number, the rollout runs.
 Rolling back is checking out the previous commit and running it again. Adding an
 application is one entry — it produces the systemd unit and its limits, the
-nginx upstream and `location`, the database account and its generated password,
-the env file, the appsettings overlay, the `app` label on logs and metrics, and
-the deploy target. No role, task or template changes.
-
-## The one difference between local and cloud
-
-Everything reads the same bucket and the same vault. Only the identity changes,
-and `pscloud` picks it automatically:
-
-```
-~/.oci/config exists  ->  use it          (a workstation, or a local VM)
-otherwise             ->  instance principal   (any machine in OCI)
-```
-
-`group_vars/env_local.yml` sets `oci_config_dir: ~/.oci`, which copies the key
-to `/root/.oci` on the test VMs. That is the entire local/cloud delta — there is
-no local artifact store, no local secret file, and no second code path.
+nginx upstream and `location`, the database account and its credential, the env
+file, the appsettings overlay, the `app` label on logs and metrics, and the
+deploy target. No role, task or template changes.
 
 ## The bucket
 
@@ -74,172 +222,51 @@ Nine artifacts: the eight publish trees, and `webroot` — the Ionic storefront 
 `/` plus the two Flutter builds at `/app` and `/monitorclientes`, in one tarball
 unpacked over the document root.
 
-`scripts/package.sh` builds all of it from the old machine's document root:
+Tarballs are packed from **inside** each directory, so the entry assembly lands
+at the root of the release:
 
 ```sh
-scripts/package.sh files/nginx-config 2026.09.12
-for f in out/*/*.tar.gz; do
-  n=$(basename "$(dirname "$f")"); v=$(basename "$f" .tar.gz); v=${v#"$n"-}
-  pscloud push "$n" "$v" "$f"
-done
+tar -C out -czf pixapi.tar.gz .
 ```
 
-Tarballs are packed from **inside** each directory, so the entry assembly lands
-at the root of the release. Three things are excluded: **state directories**
-(`Contents`, `Relatorios`, `ArquivosFiscais`, `Fonts`, `logs`) because they are
-`linked_dirs` and live in `shared/`; **build leftovers** (`publish/`, `ref/`);
-and nothing else. The script prints the `rsync` lines that seed the state
-directories once per machine.
+State directories (`Contents`, `Relatorios`, `ArquivosFiscais`, `Fonts`, `logs`)
+are excluded: they are `linked_dirs` and live in `shared/`, so a deploy must not
+overwrite them.
 
 ## Secrets
 
-Always OCI Vault. No `vault.yml`, no ansible-vault, nothing in git, and no value
-ever passes through an Ansible fact.
+Always OCI Vault. No `vault.yml`, no ansible-vault, nothing in git. The
+controller reads them with `oracle.oci`'s own modules and writes the value into
+`/etc/dotnet-apps/<app>.env`, `0640 root:dotnetapp` — the only place on a
+machine a password appears, and `systemctl show` does not print it.
+
+Each `pscloud-db-<app>` is a JSON document carrying the whole DSN, so an
+application needs nothing else to build a connection string:
+
+```json
+{ "host": "...", "port": 3306, "database": "virtualstoreglobal",
+  "username": "virtualstore_app", "password": "...",
+  "grants": ["SELECT","INSERT","UPDATE","DELETE"], "host_acl": "10.20.%" }
+```
+
+`database.yml` owns these end to end: it mints the password, stores it, and
+creates the MySQL account in the same run. Terraform cannot — the DB System is
+private and unreachable from where it runs, so it would have to write a secret
+and hope an account followed.
+
+Reading is always `stage: CURRENT`, which is what makes rotation work: a new
+version in the vault is picked up by the next converge.
 
 ```sh
-pscloud secret pscloud-prod-db-app_pixapi
+ansible-playbook database.yml -e db_rotate=true   # new version, MySQL follows
+ansible-playbook site.yml --tags apps             # straight after
 ```
 
-Reads the secret, or generates a 32-character password and stores it on first
-use. `db_users` calls it to create the MySQL account; `dotnet_app` writes
-`/etc/dotnet-apps/<app>.env.template` with `@@name@@` placeholders and
-`pscloud env` fills them in.
+Between the two, the applications still hold the previous password — the vault
+keeps both versions — so run them back to back.
 
-```
-ConnectionStrings__VSGlobalContext=…;user=app_virtualstore;password=@@pscloud-prod-db-app_virtualstore@@;…
-```
-
-The same command is a systemd unit, `pscloud-env.service`, ordered before the
-applications. That is what lets the golden image carry **no credential** and
-still produce a machine that boots serving: a pool member resolves its own
-secrets on first boot with its own instance principal.
-
-Credentials shared with systems outside the fleet are created once by hand and
-only read — `pscloud-<env>-db-admin`, `pscloud-<env>-smtp-password`,
-`pscloud-<env>-jwt-monitorclientes`:
-
-```sh
-oci vault secret create-base64 --compartment-id "$OCI_COMPARTMENT_OCID" \
-    --vault-id "$OCI_VAULT_OCID" --key-id "$OCI_VAULT_KEY_OCID" \
-    --secret-name pscloud-prod-smtp-password \
-    --secret-content-content "$(printf %s 'the password' | base64)"
-```
-
-> The `appsettings.json` inside each artifact still carries the **old** shared
-> credentials. The env file overrides all of them, so nothing uses those values,
-> but they are readable on disk. **Rotate them.**
-
-## The pipelines
-
-Three workflows in `.github/workflows/`, all on a **self-hosted runner on the
-monitoring server** — it is inside the VCN and its instance principal is the
-identity Packer and Ansible use, so no OCI key is stored in GitHub.
-
-### `publish.yml` — called by an application repository
-
-```yaml
-jobs:
-  publish:
-    uses: pontosys/pscloud/.github/workflows/publish.yml@main
-    with: { name: pixapi, version: 2026.09.12, path: ./out }
-```
-
-Packs the publish directory and uploads it. Nothing is deployed: the artifact
-just exists in the bucket now.
-
-### `image.yml` — the immutable machine
-
-Runs on a push to `ansible/**` or `packer/**`, or by hand. Packer boots a stock
-Ubuntu, hands it to `image.yml`, and captures the result. It prints the image
-OCID and prunes all but the five newest.
-
-The image comes out complete, because a pool member has to boot serving and
-nothing runs `site.yml` against a machine that appeared by itself: the runtime
-and fonts, nginx and the web root, the units and drop-ins, the agent, and **the
-applications at the versions in `applications.yml`**.
-
-Rolling it out is setting `app_image_id` in `infra/live/<env>/app-tier` and
-applying — a reviewed Terraform change, which is why nothing here calls the
-compute API.
-
-### `rollout.yml` — the canary, on existing machines
-
-Three separate runs, each triggered by a person:
-
-| stage | limit | serial |
-|---|---|---|
-| `rc` | `env_rc` — a few machines that are in the production load balancer | 1 |
-| `canary` | `env_prod` | 1 |
-| `prod` | `env_prod` | 25% |
-
-`rc` is not a copy of production. It is a small number of **production
-machines**, tagged `pscloud.environment = rc`, taking real traffic. A release
-goes there first and is watched. Between stages, read the swap and pressure
-series below — that is what says whether it held.
-
-Every deploy health-checks the app on its own port after the symlink switch and
-rolls that machine back, with the last 50 journal lines, if it does not answer.
-
-### Two paths, on purpose
-
-```
-new application version   ->  publish.yml  ->  bump version  ->  rollout.yml
-                                                             \-> image.yml (next machine)
-
-new base configuration    ->  image.yml    ->  app_image_id in Terraform
-```
-
-Existing machines are updated in place by `rollout.yml`; machines created from
-then on come from the image. Both install the same versions, from the same
-tarballs, through the same role — the only untested difference is a fresh unpack
-rather than one over an existing tree.
-
-## Testing locally
-
-Three Ubuntu 24.04 VMs. The same code, the same bucket, the same vault.
-
-```sh
-for n in 10 11 12; do
-  multipass launch 24.04 --name pscloud-$n --cpus 2 --memory 4G --disk 20G
-done
-
-docker run -d --name pscloud-mysql -p 3306:3306 -e MYSQL_ROOT_PASSWORD=localdev mysql:8.4
-
-export OCI_COMPARTMENT_OCID=… OCI_VAULT_OCID=… OCI_VAULT_KEY_OCID=…
-export PSCLOUD_DB_HOST=192.168.122.1     # reachable from the VMs, not 127.0.0.1
-
-ansible-galaxy install -r requirements.yml
-ansible-playbook -i inventory/local.yml monitoring.yml -u ubuntu
-ansible-playbook -i inventory/local.yml site.yml       -u ubuntu
-```
-
-Copy `inventory/local.yml` and put the real addresses in it; hostnames are
-addresses, matching the OCI plugin's `hostname_format: private_ip`, so
-`monitoring_host` resolves the same way in both places. The first run connects
-as the image's own user because `roles/base` has not created the accounts yet;
-after that, `-u deploy`.
-
-Create `pscloud-local-db-admin` in the vault with the container's root password
-before the first run. Everything else generates itself.
-
-What local does not cover: the instance metadata service (labels come back
-`unknown`), the load balancer and therefore the rc-in-prod idea, and the golden
-image.
-
-## Deploying to the cloud
-
-From the monitoring server — the only host with a public IP, the jump host, and
-the Ansible executor:
-
-```sh
-export OCI_COMPARTMENT_OCID=… OCI_VAULT_OCID=… OCI_VAULT_KEY_OCID=… PSCLOUD_DB_HOST=…
-ansible-playbook monitoring.yml
-ansible-playbook site.yml
-```
-
-`ansible.cfg` points at `inventory/oci.yml`, so no `-i`. Grouping comes from the
-defined tags Terraform applies — the same tags that drive the IAM dynamic
-groups.
+See **[REQUIREMENTS.md](REQUIREMENTS.md)** for what must exist beforehand and
+how to migrate the credentials Terraform used to own.
 
 ## Accounts
 
@@ -265,17 +292,17 @@ in the repository *is* the list on the machine.
 
 ## Database accounts
 
-One account per application, `app_<name>`, granted only on the schemas its
+One account per application, `<app>_app`, granted only on the schemas its
 `connections` reference. It replaces two shared logins: `glb_user` was used by
 four applications and `cep_user` by three, so a leaked connection string from
 the reports API opened the sales database for writing.
 
 ```
-app_virtualstore          cep.*:SELECT / virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE,EXECUTE
-app_monitorclientesapi    virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE,EXECUTE
-app_geradorrelatoriosapi  virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE,EXECUTE
-app_cadastrosapi          cep.*:SELECT
-app_entradaapi            cep.*:SELECT / virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE,EXECUTE
+virtualstore_app          cep.*:SELECT / virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE
+monitorclientes_app       virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE
+geradorrelatorios_app     virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE
+cadastrosapi_app          cep.*:SELECT
+entradaapi_app            cep.*:SELECT / virtualstoreglobal.*:SELECT,INSERT,UPDATE,DELETE
 ```
 
 `dashsapi`, `relatoriosapi` and `pixapi` have no `connections`, so they get no
@@ -285,36 +312,40 @@ absent: a schema change is a migration, run deliberately.
 The schemas do not have to exist — MySQL accepts a grant on a database that is
 not there yet.
 
-```sh
-ansible-playbook site.yml --tags db
-```
-
-Runs from an application VM (`run_once`), because the NSG only lets the app tier
-reach 3306. Accounts use `caching_sha2_password`; the role sets `plugin` +
-`plugin_auth_string` + `salt` rather than `password:`, which the module would
-silently downgrade to a native-password account.
+`database.yml` runs from an application VM (`run_once`), because the NSG only
+lets the app tier reach 3306. Accounts use `caching_sha2_password`; the role
+sets `plugin` + `plugin_auth_string` + `salt` rather than `password:`, which the
+module would silently downgrade to a native-password account.
 
 ## The host
 
 Terraform passes no `user_data`: a cloud-init copy of this would be a second
 definition to keep in step, and it would only run on first boot.
 
+Only settings that are safe regardless of traffic shape — each is either a limit
+the workload provably reaches, or a default that is wrong for a reverse proxy in
+front of loopback services:
+
 - `vm.overcommit_memory=1` — a .NET process reserves far more address space than
   it touches, and strict accounting refuses the reservation.
 - `vm.max_map_count=262144` — eight runtimes mapping hundreds of assemblies
   reach the 65530 default long before a memory limit.
-- BBR + fq, `tcp_slow_start_after_idle=0` — the upstreams are keepalive and idle
-  between bursts; without this the first request after a gap pays for it.
+- `tcp_slow_start_after_idle=0` — the upstreams are keepalive and idle between
+  bursts; without this the first request after a gap pays for it.
 - THP on `madvise`, no guest I/O scheduler on a paravirtualised disk.
 - Swap, 2 GB, swappiness 10 — so a GC spike pages out instead of tripping the
   OOM killer.
 - `base_open_ports` inserts ACCEPT ahead of the REJECT the OCI Ubuntu image
   ships. This is the one thing cloud-init did that had to move somewhere.
 
+The file is written whole, not key by key: `ansible.posix.sysctl` only adds and
+updates, so a setting deleted from `base_sysctl` would stay on the machine
+forever and the dictionary would stop describing it.
+
 The application VMs are x86_64 and the monitoring machine is arm64, so the
 runtime tarballs, the OpenSSL `.deb` (amd64 on `security.ubuntu.com`, arm64 on
 `ports.ubuntu.com` — separate archives) and the Docker apt repository all derive
-from `ansible_architecture`.
+from `ansible_facts['architecture']`.
 
 ## Runtime
 
@@ -327,8 +358,8 @@ the only one able to start both.
 
 An aarch64 host gets 5.0 alone. Microsoft never published
 `aspnetcore-runtime-2.1.30-linux-arm64` — 2.1 shipped `linux-x64` and
-`linux-arm` only — so `dotnet_versions` drops 2.1.30 off x64 rather than 404 in
-the middle of a play. The application VMs are x86_64 and get both.
+`linux-arm` only — so `dotnet_versions` drops 2.1.30 off arm64 rather than 404
+in the middle of a play.
 
 - **OpenSSL 1.1 is unpacked, not installed.** .NET 5 `dlopen`s
   `libssl.so.1.1`, which Ubuntu 24.04 does not ship. The `.deb` is extracted to
@@ -339,8 +370,8 @@ the middle of a play. The application VMs are x86_64 and get both.
   Ubuntu 24.04 ships 74, so `CLR_ICU_VERSION_OVERRIDE` is set from the detected
   version. That knob arrived in .NET Core 3.0, so a 2.1 application ignores it
   and finds no ICU it recognises: globalization for anything actually deployed
-  on 2.1 has to be settled separately — invariant mode, or an old `libicu`
-  staged the way OpenSSL is. Nothing in `applications.yml` targets 2.1 today.
+  on 2.1 has to be settled separately. Nothing in `applications.yml` targets 2.1
+  today.
 - **Workstation GC.** `COMPlus_gcServer=0`: server GC allocates a heap and a
   thread per core per process, and eight processes on two cores would mean
   sixteen heaps competing for 4.4 GB. The `COMPlus_` prefix is deliberate —
@@ -386,8 +417,7 @@ satisfy. `app_mem_pressure_avg10{kind="full"}` above a few percent means every
 task in the cgroup is stalled — a process about to be killed, minutes ahead.
 
 Alert on `app_swap_pct > 50` or `app_mem_pressure_avg10{kind="full"} > 5`, not
-on `app_oom_kills_total`. This is what to read between the `rc` and `canary`
-stages of a rollout.
+on `app_oom_kills_total`.
 
 ### The monitoring machine
 
@@ -430,7 +460,6 @@ journalctl -u dotnet-app@pixapi -f
 curl -s localhost/healthz
 curl -s localhost:8081/nginx_status
 grep swap /var/lib/node_exporter/textfile/app_metrics.prom
-pscloud secret pscloud-prod-db-app_pixapi
 ```
 
 ```

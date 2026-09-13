@@ -1,0 +1,26 @@
+plugin: oracle.oci.oci
+
+regions:
+  - sa-saopaulo-1
+
+compartments:
+  - compartment_ocid: "{{ lookup('env', 'OCI_COMPARTMENT_OCID') }}"
+    fetch_hosts_from_subcompartments: false
+
+instance_states:
+  - RUNNING
+
+include_host_filters:
+  - "defined_tags.get('pscloud', {}).get('environment') == 'prod'"
+
+hostname_format: private_ip
+
+keyed_groups:
+  - key: defined_tags['pscloud']['role']
+    prefix: role
+    separator: "_"
+
+compose:
+  ansible_host: private_ip
+  oci_display_name: display_name
+  oci_fault_domain: fault_domain

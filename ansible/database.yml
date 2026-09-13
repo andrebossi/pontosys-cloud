@@ -1,0 +1,8 @@
+---
+- name: Database
+  hosts: role_app
+  become: true
+  gather_facts: false
+  roles:
+    - role: db_users
+      run_once: true

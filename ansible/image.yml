@@ -6,7 +6,6 @@
     app_bake: true
   roles:
     - base
-    - pscloud
     - dotnet_runtime
     - nginx_app
     - dotnet_app

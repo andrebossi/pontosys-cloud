@@ -6,11 +6,57 @@
     release: "{{ app_deploy_root }}/{{ app_name }}/releases/{{ applications[app_name].version }}"
   block:
 
-    # The machine downloads it itself, with its own identity -- instance
-    # principal in OCI, the API key on a local VM.
-    - name: "{{ app_name }} — fetch {{ app.version }}"
-      ansible.builtin.command: "/usr/local/bin/pscloud fetch {{ app_name }} {{ app.version }} {{ release }}"
-      args:
+    - name: "{{ app_name }} — release directory"
+      ansible.builtin.file:
+        path: "{{ release }}"
+        state: directory
+        owner: "{{ app_deploy_user }}"
+        group: "{{ app_deploy_user }}"
+        mode: "0755"
+
+    - name: Artifact cache on the controller
+      ansible.builtin.file:
+        path: "{{ artifact_cache }}"
+        state: directory
+        mode: "0700"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+
+    - name: "{{ app_name }} — namespace"
+      oracle.oci.oci_object_storage_namespace_facts:
+        auth_type: "{{ oci_auth_type }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      register: ns
+      when: oci_namespace is not defined
+
+    - name: "{{ app_name }} — remember it"
+      ansible.builtin.set_fact:
+        oci_namespace: "{{ ns.namespace }}"
+      when: oci_namespace is not defined
+
+    - name: "{{ app_name }} — download {{ app.version }}"
+      oracle.oci.oci_object_storage_object:
+        namespace_name: "{{ oci_namespace }}"
+        bucket_name: "{{ artifact_bucket }}"
+        object_name: "artifacts/{{ app_name }}/{{ app_name }}-{{ app.version }}.tar.gz"
+        dest: "{{ artifact_cache }}/{{ app_name }}-{{ app.version }}.tar.gz"
+        state: present
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: "{{ app_name }} — unpack"
+      ansible.builtin.unarchive:
+        src: "{{ artifact_cache }}/{{ app_name }}-{{ app.version }}.tar.gz"
+        dest: "{{ release }}"
+        owner: "{{ app_deploy_user }}"
+        group: "{{ app_deploy_user }}"
+        extra_opts: [--no-same-owner]
         creates: "{{ release }}/{{ app.dll }}"
 
     - name: "{{ app_name }} — owner"
@@ -21,8 +67,6 @@
         group: "{{ app_deploy_user }}"
         recurse: true
 
-    # State that outlives the release: certificates, generated reports, fiscal
-    # tables. They live in shared/ and are linked into the release tree.
     - name: "{{ app_name }} — link state and settings"
       ansible.builtin.file:
         path: "{{ release }}/{{ item }}"
@@ -38,8 +82,6 @@
         path: "{{ home }}/current"
       register: current
 
-    # Replacing a symlink is atomic: there is no instant where `current` points
-    # at a half-unpacked tree.
     - name: "{{ app_name }} — switch to {{ app.version }}"
       ansible.builtin.file:
         path: "{{ home }}/current"
@@ -56,8 +98,6 @@
         daemon_reload: true
       when: not app_bake | bool
 
-    # Type=exec reports "started" as soon as execve succeeds, which says nothing
-    # about whether Kestrel is listening. Any HTTP answer proves it is up.
     - name: "{{ app_name }} — answers on 127.0.0.1:{{ app.port }}"
       ansible.builtin.uri:
         url: "http://127.0.0.1:{{ app.port }}/"
@@ -74,8 +114,6 @@
       changed_when: true
 
   rescue:
-    # Automatic: the alternative is leaving a broken release live while someone
-    # reads the error.
     - name: "{{ app_name }} — roll back"
       ansible.builtin.file:
         path: "{{ home }}/current"

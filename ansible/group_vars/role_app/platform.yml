@@ -5,9 +5,6 @@
 #   apps.slice                    the group
 #     └ dotnet-app@<name>.service  one application
 
-# Everything outside apps.slice. The slice ceilings follow from it.
-apps_slice_reserve_mb: 1600
-
 # MemoryHigh is soft -- the kernel throttles and reclaims, which is the window
 # where the GC can still react. MemoryMax is hard, and crossing it is an OOM
 # kill. CPUQuota is also what makes the kernel fill throttled_usec in cpu.stat.
@@ -31,8 +28,6 @@ app_tiers:
     io_weight: 100
 
   critical:
-    # Payments and the global directory. No swap: a paged-out payment handler
-    # adds seconds to the one request that must not hang.
     memory_min: 128M
     memory_high: 350M
     memory_max: 450M
@@ -42,8 +37,6 @@ app_tiers:
     io_weight: 300
 
   batch:
-    # Report rendering: heavy, bursty, tolerant of being slow. Lowest weights,
-    # so a 40-page NFe never delays a sale.
     memory_min: 96M
     memory_high: 500M
     memory_max: 700M
@@ -52,16 +45,8 @@ app_tiers:
     cpu_weight: 50
     io_weight: 20
 
-# Applied to every app unit. The COMPlus_ prefix is deliberate: DOTNET_ as a
-# runtime-configuration prefix only became valid in .NET 6, and written that
-# way here it would be silently ignored.
 dotnet_runtime_env:
-  # Server GC allocates a heap and a thread per core per process: nine
-  # processes on two cores would mean eighteen heaps competing for 4.4 GB.
-  # This is the single most important setting on this box.
   COMPlus_gcServer: "0"
-  # Percentage of the cgroup limit the GC may use as heap, IN HEXADECIMAL.
-  # 4B = 75, leaving room for JIT, loader and stacks inside MemoryMax.
   COMPlus_GCHeapHardLimitPercent: "4B"
   COMPlus_GCConserveMemory: "3"
   COMPlus_gcConcurrent: "0"
@@ -69,19 +54,11 @@ dotnet_runtime_env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "1"
   ASPNETCORE_ENVIRONMENT: "Production"
 
-# One server on port 80 -- the load balancer terminates TLS -- routing by path.
-# Path routing is not a preference: the apps build absolute URLs from the
-# prefix, so host-based routing would need every one of those rewritten.
 nginx_listen_port: 80
-# stub_status on loopback, scraped by Fluent Bit's nginx_metrics input.
 nginx_status_port: 8081
 
-# What /readyz proxies. /healthz is a static 200 that only proves the VM is
-# serving; this one goes through to a real application.
 readyz_app: monitorclientesapi
 
-# The old machine used 600s for everything, so a hung payment held a worker for
-# ten minutes. Reports keep it; everything else fails fast.
 app_nginx_tiers:
   site:
     connect_timeout: 5s

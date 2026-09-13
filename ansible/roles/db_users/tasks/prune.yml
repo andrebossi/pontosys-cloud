@@ -1,38 +1,45 @@
 ---
-# Only accounts carrying db_user_prefix are considered: an operator login, a
-# replication account or the admin itself must survive a run with an
+# Only accounts matching db_user_pattern are considered: an operator login, a
+# replication account or the administrator itself must survive a run with an
 # incomplete catalog.
-- name: Accounts under {{ db_user_prefix }}
+- name: Accounts matching {{ db_user_pattern }}
   ansible.mysql.mysql_query:
     login_host: "{{ db_admin.host }}"
     login_port: "{{ db_admin.port }}"
     login_user: "{{ db_admin.username }}"
-    login_password: "{{ db_admin_password }}"
-    query: >-
-      SELECT user FROM mysql.user
-      WHERE user LIKE CONCAT(%(prefix)s, '%%') AND host = %(host)s
+    login_password: "{{ db_admin.password }}"
+    query: "SELECT user, host FROM mysql.user WHERE user LIKE %(pattern)s"
     named_args:
-      prefix: "{{ db_user_prefix }}"
-      host: "{{ db_user_host }}"
+      pattern: "{{ db_user_pattern }}"
   register: existing_users
   changed_when: false
   no_log: true
 
+# user AND host: the same name at a different address is a different account,
+# and Terraform decides the address per application through host_acl.
 - name: Which of them no application claims
   ansible.builtin.set_fact:
+    claimed_users: >-
+      {{ db_apps | map(attribute='key') | map('extract', db_secrets)
+         | map(attribute='username') | list }}
     orphan_users: >-
-      {{ (existing_users.query_result | first | map(attribute='user') | list)
-         | difference(db_apps | map(attribute='key')
-                      | map('regex_replace', '^', db_user_prefix) | list) }}
+      {{ existing_users.query_result | first
+         | rejectattr('user', 'in', claimed) | list }}
+  vars:
+    claimed: >-
+      {{ db_apps | map(attribute='key') | map('extract', db_secrets)
+         | map(attribute='username') | list }}
 
 - name: Remove them
   ansible.mysql.mysql_user:
     login_host: "{{ db_admin.host }}"
     login_port: "{{ db_admin.port }}"
     login_user: "{{ db_admin.username }}"
-    login_password: "{{ db_admin_password }}"
-    name: "{{ item }}"
-    host: "{{ db_user_host }}"
+    login_password: "{{ db_admin.password }}"
+    name: "{{ item.user }}"
+    host: "{{ item.host }}"
     state: absent
   loop: "{{ orphan_users }}"
+  loop_control:
+    label: "{{ item.user }}@{{ item.host }}"
   no_log: true

@@ -1,0 +1,10 @@
+---
+app_env: local
+
+host_vcpus: 2
+host_memory_mb: 4096
+apps_slice_reserve_mb: 1200
+
+oci_auth_type: api_key
+
+db_create_schemas: true

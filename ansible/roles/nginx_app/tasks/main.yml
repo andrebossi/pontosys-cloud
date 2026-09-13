@@ -74,6 +74,12 @@
 - name: Flush pending reloads before checking
   ansible.builtin.meta: flush_handlers
 
+- name: The running process has the configuration on disk
+  ansible.builtin.systemd:
+    name: nginx
+    state: reloaded
+  changed_when: false
+
 - name: The load balancer health check answers
   ansible.builtin.uri:
     url: "http://127.0.0.1:{{ nginx_listen_port }}/healthz"

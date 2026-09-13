@@ -13,23 +13,6 @@ variable "ssh_key_roles" {
   default     = ["app", "db", "monitoring"]
 }
 
-variable "applications" {
-  description = <<-EOT
-    Application catalog. Each entry generates:
-      - a dedicated MariaDB user with a random password
-      - an OCI Vault secret with the full DSN
-    Adding an application = adding a key to this map. Nothing else changes.
-  EOT
-  type = map(object({
-    db_name   = string
-    db_user   = string
-    db_host   = optional(string, "%")
-    grants    = optional(list(string), ["SELECT", "INSERT", "UPDATE", "DELETE"])
-    databases = optional(list(string), [])
-  }))
-  default = {}
-}
-
 variable "db_admin_username" {
   type    = string
   default = "pscloudadm"
@@ -54,18 +37,4 @@ variable "admin_cidrs" {
 variable "freeform_tags" {
   type    = map(string)
   default = {}
-}
-
-variable "backup_retention" {
-  type = object({
-    archive_after_days = optional(number, 30)
-    delete_after_days  = optional(number, 365)
-  })
-  default = {}
-}
-
-variable "immutable_retention_days" {
-  description = "Timed retention rule: for N days nobody can delete or overwrite an object. 0 disables it."
-  type        = number
-  default     = 0
 }

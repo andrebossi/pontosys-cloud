@@ -2,12 +2,13 @@
 # app_settings_*  non-secret, rendered into shared/appsettings.Production.json
 #                 and overlaid by .NET on top of the artifact's own
 #                 appsettings.json
-# app_secret_refs secret. A name in the vault, rendered into
-#                 /etc/dotnet-apps/<app>.env, which outranks every JSON file.
+# Secrets are NOT here. They are one line in the application's own catalog
+# entry -- `secrets: {ENV_VAR: name}` in applications.yml -- and are rendered
+# into /etc/dotnet-apps/<app>.env, which outranks every JSON file.
 #
 # Nesting in an env var uses "__". The blocks below mirror what each app reads
 # today; only the user and the host change -- each one now connects as its own
-# app_<name> account instead of the shared glb_user and cep_user.
+# <app>_app account instead of the shared glb_user and cep_user.
 
 app_public_url: "https://virtualstore.pontosys.com"
 
@@ -28,7 +29,7 @@ _serilog: &serilog
         Serilog.AspNetCore.RequestLoggingMiddleware: Fatal
 
 # The storefront family. Audience and issuer are not secrets; the signing key
-# is, and it is in app_secret_refs.
+# is, so it lives in the application's `secrets:` map instead.
 _token_vs: &token_vs
   TokenConfigurations:
     Audience: VSAudiencePS
@@ -103,48 +104,5 @@ app_settings:
 
   pixapi: {}
 
-# db_servers is where a schema lives. It holds no credentials: a server is a
-# location, not an identity. Who connects is one account per application,
-# app_<name>, granted only on the schemas its `connections` reference.
-db_host: "{{ lookup('env', 'PSCLOUD_DB_HOST') }}"
-db_port: 3306
-
-db_servers:
-  global:
-    host: "{{ db_host }}"
-    port: "{{ db_port }}"
-    database: virtualstoreglobal
-
-  cep:
-    host: "{{ db_host }}"
-    port: "{{ db_port }}"
-    database: cep
-    # Brazilian postal codes: a reference set loaded out of band. Nothing in
-    # the fleet writes it, so nothing in the fleet gets write access to it.
-    privileges: SELECT
-
-# What an application gets unless db_servers or the catalog says otherwise.
-# DROP, ALTER and CREATE are absent: a schema change is a migration, run
-# deliberately, not something an API can do by accident.
-db_privileges_default: SELECT,INSERT,UPDATE,DELETE,EXECUTE
-
-db_user_prefix: app_
-db_user_host: "10.20.%"
-
-db_admin:
-  host: "{{ db_host }}"
-  port: "{{ db_port }}"
-  username: "{{ lookup('env', 'PSCLOUD_DB_ADMIN_USER') | default('admin', true) }}"
-
 db_pool_max: 12
 
-# Environment variable -> secret name in the vault. Database passwords are not
-# listed: roles/secrets generates them on first run. These two are shared with
-# systems outside the fleet, so they are created once and only read.
-app_secret_refs:
-  virtualstore:
-    SmtpClientData__MailPass: "{{ secret_prefix }}-smtp-password"
-  monitorclientesapi:
-    TokenConfigurations__Key: "{{ secret_prefix }}-jwt-monitorclientes"
-  geradorrelatoriosapi:
-    TokenConfigurations__Key: "{{ secret_prefix }}-jwt-monitorclientes"

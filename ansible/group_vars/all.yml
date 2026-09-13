@@ -1,29 +1,21 @@
 ---
+# SHARED — identical in every environment.
+
 label_prefix: pscloud
+
 compartment_ocid: "{{ lookup('env', 'OCI_COMPARTMENT_OCID') }}"
 oci_vault_id: "{{ lookup('env', 'OCI_VAULT_OCID') }}"
 oci_vault_key_id: "{{ lookup('env', 'OCI_VAULT_KEY_OCID') }}"
-# pscloud-releases, created by infra/bootstrap -- a plain private versioned
-# bucket, which is what artifacts want. NOT the platform module's bucket: that
-# one is the backup store (KMS, WORM retention, ARCHIVE lifecycle) and a WORM
-# rule would make pruning an old release impossible.
-# Derived from label_prefix so the name exists in one place.
+
+secret_prefix: "{{ label_prefix }}"
+
 artifact_bucket: "{{ label_prefix }}-releases"
+artifact_cache: /tmp/pscloud-artifacts
 
 timezone: America/Sao_Paulo
-
 ansible_managed: "Ansible managed -- edits are overwritten on the next run"
 
-secret_prefix: "{{ label_prefix }}-{{ app_env }}"
-app_env: prod
-
-# VM.Standard.E4.Flex, 1 OCPU (2 vCPU), 6 GB. The slice ceilings, the GC limits
-# and the nginx worker count all follow from these two numbers.
-host_vcpus: 2
-host_memory_mb: 6144
-
 monitoring_host: "{{ groups['role_monitoring'] | first | default('127.0.0.1') }}"
-
 monitoring_endpoints:
   metrics: { host: "{{ monitoring_host }}", port: 8428, uri: /api/v1/write }
   logs:    { host: "{{ monitoring_host }}", port: 9428, uri: /insert/jsonline }

@@ -63,3 +63,8 @@ ansible/group_vars/**/vault.yml
 ansible/host_vars/**/vault.yml
 ansible/collections
 ansible/roles/robertdebock.fail2ban
+
+### Credentials ###
+!.env.example
+.env
+ansible/.venv
