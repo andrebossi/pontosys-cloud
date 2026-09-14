@@ -1,12 +1,4 @@
 ---
-# Schemas, accounts and the credentials behind them. Runs from an application
-# VM because the NSG only lets the app tier reach 3306, and once, because the
-# accounts are server-side.
-#
-# Everything it needs is the `database:` block in each catalog entry: the vault
-# name, and the schemas the account may reach. Nothing is derived from an
-# application's name.
-
 - name: MySQL client library
   ansible.builtin.apt:
     name: python3-pymysql

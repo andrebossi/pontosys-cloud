@@ -5,21 +5,11 @@ fluentbit_config_dir: /etc/fluent-bit
 fluentbit_state_dir: /var/lib/fluent-bit
 fluentbit_textfile_dir: /var/lib/node_exporter/textfile
 
-# The agent is a tenant on this box, not the point of it.
 fluentbit_memory_max: 96M
 fluentbit_cpu_quota: 15%
 
-# Admin endpoint on loopback: health, the agent's own metrics, and
-# POST /api/v2/reload, which swaps the configuration without killing the
-# process -- so a collection change opens no gap in the series.
 fluentbit_http_port: 2020
 
-# Appended to the base lists below, never replacing them: Ansible replaces
-# same-named lists between groups and the loss would be silent.
-# Two independent slots, because Ansible REPLACES a same-named list between
-# groups rather than merging it. role_app fills _extra_, role_monitoring fills
-# _backend_, and a machine in both -- the local one-box setup -- gets both
-# instead of silently losing one.
 fluentbit_extra_inputs: []
 fluentbit_extra_filters: []
 fluentbit_extra_outputs: []
@@ -29,25 +19,13 @@ fluentbit_backend_outputs: []
 fluentbit_extra_files: []
 textfile_exporters: []
 
-# ---------------------------------------------------------------------------
-# WHAT EVERY VM COLLECTS
-#
-# Chosen for the questions this host has to answer: is it up, how much is it
-# serving, and how close to saturation is it. A collector costs series, and
-# series are what a small backend runs out of first.
-# ---------------------------------------------------------------------------
 fluentbit_base_inputs:
   - name: node_exporter_metrics
     tag: node_metrics
     scrape_interval: 30
-    # meminfo carries SwapTotal/SwapFree and vmstat the pswpin/pswpout and
-    # oom_kill counters -- the host side of the swap picture the cgroup
-    # exporter fills in per app.
     metrics: cpu,meminfo,diskstats,filesystem,loadavg,vmstat,stat,time,uname,netdev,filefd,systemd,textfile
     collector.textfile.path: /var/lib/node_exporter/textfile
     collector.textfile.scrape_interval: 30
-    # Without the filter, systemd contributes a handful of series per unit for
-    # every unit on the box.
     systemd_include_pattern: (dotnet-app@.+\.service|nginx\.service|fluent-bit\.service|ssh\.service)
     systemd_service_restart_metrics: true
     systemd_unit_start_time_metrics: true
@@ -55,13 +33,10 @@ fluentbit_base_inputs:
     filesystem.ignore_mount_point_regex: ^/(dev|proc|sys|run)($|/)
     threaded: "on"
 
-  # The agent watching itself: dropped records, retries, buffer size. Without
-  # it a backend outage looks exactly like a quiet night.
   - name: fluentbit_metrics
     tag: fb_metrics
     scrape_interval: 30
 
-  # Host errors, and the OOM killer specifically.
   - name: systemd
     tag: host.err
     systemd_filter:
@@ -78,8 +53,6 @@ fluentbit_base_inputs:
     storage.type: filesystem
     threaded: "on"
 
-# Identity on every record, from /run/instance.env. This is what tells two
-# instance-pool VMs apart when neither has a stable name.
 fluentbit_base_filters:
   - name: record_modifier
     match: "*"
@@ -90,14 +63,10 @@ fluentbit_base_filters:
       - role ${ROLE}
       - release ${RELEASE}
 
-  # `job` was a Loki label; with native VictoriaLogs ingestion every stream
-  # field has to be a field on the record.
   - name: modify
     match: host.err
     add: job host
 
-  # Was loki's remove_keys. Journald attaches a couple of dozen fields per
-  # line; these are the ones nobody has ever queried.
   - name: record_modifier
     match_regex: ^(host\.err|app\.log)$
     remove_key:
@@ -125,13 +94,8 @@ fluentbit_base_outputs:
       - fault_domain ${FD}
       - job oci-${ROLE}
     retry_limit: 5
-    # Buffered on disk: a monitoring outage costs a gap in the graph rather
-    # than the agent's memory limit.
     storage.total_limit_size: 256M
 
-  # VictoriaLogs, native ingestion. `format: json_lines` plus
-  # `json_date_format: iso8601` is what makes Fluent Bit's own `date` key the
-  # one _time_field points at.
   - name: http
     match: host.err
     host: "{{ monitoring_endpoints.logs.host }}"

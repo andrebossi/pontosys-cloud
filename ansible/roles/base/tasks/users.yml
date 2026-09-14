@@ -1,17 +1,4 @@
 ---
-# Three accounts, three jobs. Nothing logs in as root and nothing runs an
-# application as a human.
-#
-#   deploy     the automation identity. Ansible connects as this.
-#   ops        humans, for looking at a machine that is misbehaving.
-#
-# The honest limit: `deploy` has full sudo, because Ansible's modules run as
-# root and a command allowlist that covers them is an allowlist for root. What
-# it buys is that automation is a separate, keyed, non-interactive account with
-# its own audit trail -- not a shared login. `ops` is where the restriction is
-# real: its allowlist is short enough to read, and most of what it needs is
-# group membership rather than sudo at all.
-
 - name: Operational accounts
   ansible.builtin.user:
     name: "{{ item.key }}"

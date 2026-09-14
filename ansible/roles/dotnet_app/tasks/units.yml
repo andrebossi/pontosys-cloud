@@ -17,7 +17,6 @@
     mode: "{{ item.mode | default('0755') }}"
   loop:
     - { path: "{{ app_deploy_root }}", owner: "{{ app_deploy_user }}", group: "{{ app_deploy_user }}" }
-    # 0750 root:dotnetapp -- the env files inside carry database passwords.
     - { path: "{{ app_config_dir }}", group: "{{ app_deploy_user }}", mode: "0750" }
     - { path: "{{ app_dumps_dir }}", owner: "{{ app_deploy_user }}", group: "{{ app_deploy_user }}" }
 

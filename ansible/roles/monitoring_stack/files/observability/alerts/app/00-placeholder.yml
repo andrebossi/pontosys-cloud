@@ -1,4 +1,1 @@
-# App alert groups. Empty on purpose: rules are added later.
-# vmalert refuses to start if a --rule glob doesn't match any file,
-# so this file exists to keep the container up until there's a rule.
 groups: []

@@ -2,6 +2,8 @@ Vagrant.configure("2") do |config|
   config.vm.box = "cloud-image/ubuntu-24.04"
   config.vm.box_version = "20260911.0.0"
 
+  config.vm.network "private_network", ip: "192.168.121.64"
+
   config.vm.provider :libvirt do |lv|
     lv.memory = 4096
     lv.cpus   = 4

@@ -7,9 +7,6 @@
       - libgssapi-krb5-2
       - libstdc++6
       - zlib1g
-      # System.Drawing.Common on Linux wraps libgdiplus, which is not a managed
-      # dependency: it is absent until installed, and only a rendered report
-      # notices.
       - libgdiplus
       - libc6-dev
       - fontconfig
@@ -17,9 +14,6 @@
     update_cache: true
     cache_valid_time: 3600
 
-# .NET 5 probes libicuuc.so up to 67 and Ubuntu 24.04 ships 74, so the version
-# is handed over explicitly. Detected, so a distribution upgrade does not break
-# globalization on every app at once.
 - name: Host ICU version
   ansible.builtin.shell:
     cmd: ls /usr/lib/{{ ansible_facts['architecture'] }}-linux-gnu/libicuuc.so.* | sed -E 's/.*so\.([0-9]+).*/\1/' | sort -rn | head -1
@@ -53,9 +47,6 @@
     state: directory
     mode: "0755"
 
-# Unpacked in the order they are listed, oldest first: the bundles overlap in
-# the muxer and in host/fxr, and `dotnet` loads the highest hostfxr it finds,
-# which is the one that can start both frameworks.
 - name: ASP.NET Core runtimes
   ansible.builtin.unarchive:
     src: "https://builds.dotnet.microsoft.com/dotnet/aspnetcore/Runtime/{{ item }}/aspnetcore-runtime-{{ item }}-linux-{{ dotnet_arch }}.tar.gz"
@@ -76,8 +67,6 @@
                | reject('in', dotnet_runtimes_out.stdout)
                | list | length > 0
 
-# Report layouts reference Arial, Tahoma and Orator by name. Missing, libgdiplus
-# substitutes a default face and invoices come out with the wrong column widths.
 - name: Fonts
   ansible.builtin.copy:
     src: fonts/
@@ -90,11 +79,7 @@
   when: fonts is changed
   changed_when: true
 
-# fc-match always answers, so the answer is what matters: a family that is not
-# installed resolves to DejaVu and every report renders with the wrong metrics.
 - name: Fonts resolve to the installed files
-  # argv, not a string: `command` splits a string on whitespace, so the family
-  # "Orator10 BT" arrived as two patterns and fc-match answered with nothing.
   ansible.builtin.command:
     argv: [fc-match, "--format=%{file}", "{{ item }}"]
   loop: [Arial, Tahoma, "Orator10 BT"]

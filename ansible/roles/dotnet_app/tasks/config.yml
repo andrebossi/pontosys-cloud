@@ -1,6 +1,4 @@
 ---
-# Non-secret settings. .NET reads appsettings.json from the artifact and
-# overlays this, so behaviour changes without rebuilding the artifact.
 - name: Application settings
   ansible.builtin.template:
     src: appsettings.json.j2
@@ -23,12 +21,6 @@
       keys/.env.example, then `source keys/.env`.
     quiet: true
 
-# Read once per name, by the short name the catalog uses. The <secret_prefix>-
-# half is added here and nowhere else, so the catalog stays the same in every
-# environment and a vault name is greppable.
-#
-# stage: CURRENT is what makes rotation work: a new version in the vault is
-# picked up by the next converge.
 - name: Secrets
   oracle.oci.oci_secrets_secret_bundle_facts:
     secret_name: "{{ secret_prefix }}-{{ item }}"
@@ -40,15 +32,11 @@
   loop: "{{ app_secret_names }}"
   register: bundles
   changed_when: false
-  # getByName takes seconds a call and intermittently answers 404 for a name
-  # that exists, which is what throttling looks like on this endpoint.
   retries: 5
   delay: 15
   until: bundles is succeeded
   no_log: true
 
-# Keyed by the SHORT name the catalog uses, so the template reads
-# secret_values['db-pixapi'] and nothing has to be assembled there.
 - name: Values
   ansible.builtin.set_fact:
     secret_values: >-
@@ -63,10 +51,6 @@
       {{ dict(app_secret_names | zip(bundles.results
               | map(attribute='secret_bundle.version_number'))) }}
 
-# Written straight out, with the values in it. There is no .env.template and
-# no resolver unit: Ansible has the values, so Ansible writes the file. 0640
-# root:dotnetapp is the only place on the machine a password appears, and
-# `systemctl show` does not print it -- EnvironmentFile is read by PID 1.
 - name: Environment files
   ansible.builtin.template:
     src: app.env.j2
@@ -91,8 +75,6 @@
 
 - name: Restart what changed
   block:
-    # An application with no `current` symlink has never been deployed; its
-    # unit fails AssertPathExists on purpose and is left alone.
     - name: Which applications are deployed
       ansible.builtin.stat:
         path: "{{ app_deploy_root }}/{{ item.key }}/current"
@@ -114,7 +96,6 @@
         state: started
       loop: "{{ deployed }}"
 
-    # Only what changed: an edit on the reports API must not bounce payments.
     - name: Restarted
       ansible.builtin.systemd:
         name: "dotnet-app@{{ item }}.service"

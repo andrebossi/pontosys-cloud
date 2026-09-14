@@ -1,7 +1,4 @@
 ---
-# Only accounts matching db_user_pattern are considered: an operator login, a
-# replication account or the administrator itself must survive a run with an
-# incomplete catalog.
 - name: Accounts matching {{ db_user_pattern }}
   ansible.mysql.mysql_query:
     login_host: "{{ db_admin.host }}"
@@ -15,8 +12,6 @@
   changed_when: false
   no_log: true
 
-# user AND host: the same name at a different address is a different account,
-# and Terraform decides the address per application through host_acl.
 - name: Which of them no application claims
   ansible.builtin.set_fact:
     claimed_users: >-

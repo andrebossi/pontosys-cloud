@@ -3,13 +3,9 @@ nginx_listen_port: 80
 nginx_status_port: 8081
 nginx_user: nginx
 
-# The nginx.org repository rather than the distribution package: it tracks
-# stable upstream instead of Ubuntu's 1.24 freeze.
 nginx_install_from: nginx_repository
 nginx_branch: stable
 
-# auto = one worker per vCPU. On 1 OCPU that is 2, which is right: nginx here
-# is a proxy, not a TLS terminator, and is never the bottleneck.
 nginx_worker_processes: auto
 nginx_worker_connections: 4096
 nginx_worker_rlimit_nofile: 65535
@@ -19,15 +15,9 @@ nginx_access_log: /var/log/nginx/access.json.log
 nginx_error_log: /var/log/nginx/error.log
 nginx_error_log_level: warn
 
-# JWTs in an Authorization header overflow the default 8k buffer and nginx
-# answers 400 before the request reaches Kestrel.
 nginx_large_client_header_buffers: "4 32k"
-# Static assets are immutable per release; caching their descriptors avoids a
-# stat() per request on a box with one disk.
 nginx_open_file_cache: "max=2000 inactive=60s"
 
-# The Flutter and Ionic bundles are megabytes of JS -- the biggest single win
-# available for the storefront's first paint.
 nginx_gzip:
   enabled: true
   comp_level: 5
@@ -48,11 +38,8 @@ nginx_error_pages:
   "404": /404.html
   "50x": /50x.html
 
-# Passive health check: after max_fails errors inside fail_timeout the upstream
-# leaves rotation. Open-source nginx has no active check.
 app_upstream_max_fails: 3
 app_upstream_fail_timeout: 10s
-# Nine upstreams x 16 x 2 workers = 288 sockets, well inside the fd limit.
 app_upstream_keepalive: 16
 
 

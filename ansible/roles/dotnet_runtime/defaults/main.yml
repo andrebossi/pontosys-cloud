@@ -1,29 +1,13 @@
 ---
-# Runtimes only -- no SDK on an application server. Both frameworks live side
-# by side under dotnet_root, so an application picks the one it was built
-# against without anything else on the machine changing.
-#
-# Ascending order, and it matters: every bundle carries its own copy of the
-# muxer and of host/fxr, so the newest has to be unpacked last for `dotnet` to
-# be able to start both.
-#
-# arm64 gets 5.0 alone. There is no aspnetcore-runtime-2.1.30-linux-arm64:
-# 2.1 shipped linux-x64 and linux-arm only, and the download 404s. The
-# application VMs are x86_64 and get both; an aarch64 test VM cannot.
 dotnet_versions: "{{ ['2.1.30', '5.0.15'] if dotnet_arch == 'x64' else ['5.0.15'] }}"
 
 dotnet_root: /opt/dotnet
 dotnet_compat_dir: /opt/dotnet/compat
 dotnet_fonts_dir: /usr/local/share/fonts/msttcore
 
-# x86_64 in OCI, aarch64 on a local test VM.
 dotnet_arch: "{{ {'x86_64': 'x64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
 deb_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
 
-# .NET 5 dlopens libssl.so.1.1 and Ubuntu 24.04 ships OpenSSL 3 only. The .deb
-# is unpacked into a private directory, never installed: apt install libssl1.1
-# would put an end-of-life TLS library on the search path of every process.
-# arm64 lives on ports.ubuntu.com, a separate archive from security.ubuntu.com.
 libssl_url: >-
   {{ 'http://ports.ubuntu.com/ubuntu-ports' if deb_arch == 'arm64'
      else 'http://security.ubuntu.com/ubuntu' }}/pool/main/o/openssl/libssl1.1_1.1.1f-1ubuntu2.24_{{ deb_arch }}.deb

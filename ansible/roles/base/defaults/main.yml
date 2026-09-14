@@ -8,21 +8,12 @@ base_packages:
   - unzip
   - tar
   - sysstat
-  # ansible.builtin.deb822_repository, used for the Fluent Bit repository.
   - python3-debian
   - iptables-persistent
-  # ansible.posix.acl, used to give ops read access to the app trees.
   - acl
 
-# Opened on the OCI Ubuntu image, which ships an INPUT chain ending in REJECT.
 base_open_ports: []
 
-# ---------------------------------------------------------------------------
-# ACCOUNTS
-#
-# See tasks/users.yml for what each one is for. Public keys go in
-# group_vars or host_vars -- they are not secrets, but they are site-specific.
-# ---------------------------------------------------------------------------
 base_users:
   deploy:
     comment: Deployment automation
@@ -31,8 +22,6 @@ base_users:
 
   ops:
     comment: Read-only operations
-    # systemd-journal reads the journal, adm reads /var/log. Between them,
-    # almost nothing here needs sudo.
     groups: [systemd-journal, adm]
     sudo:
       - /usr/bin/systemctl status *
@@ -40,38 +29,12 @@ base_users:
       - /usr/bin/systemctl show *
       - /usr/bin/systemctl cat *
       - /usr/bin/systemctl list-units *
-      # Restarting an application is the one write it gets: it is the fix for
-      # a wedged process at 3am, and it cannot reach any other unit.
       - /usr/bin/systemctl restart dotnet-app@*
       - /usr/bin/journalctl *
       - /usr/bin/systemd-cgtop *
       - /usr/bin/systemd-analyze *
     ssh_keys: []
 
-# ---------------------------------------------------------------------------
-# KERNEL TUNING
-#
-# Only settings that are safe regardless of traffic shape. Each one is either
-# a LIMIT the workload provably reaches, or a default that is wrong for a
-# reverse proxy in front of loopback services.
-#
-# Deliberately absent, and why -- these were here and were removed:
-#
-#   tcp_congestion_control=bbr   BBR is a win on long, lossy paths. This one
-#     default_qdisc=fq           is a private subnet at sub-millisecond RTT,
-#                                where it is a wash, and the sysctl FAILS
-#                                outright if tcp_bbr is not loaded.
-#   vfs_cache_pressure=150       reclaims dentry/inode cache harder. A host
-#                                that opens hundreds of assemblies and
-#                                thousands of static files wants that cache
-#                                kept, not dropped.
-#   dirty_ratio / _background    writeback tuning is workload-shaped. The
-#                                defaults are not wrong here, and guessing
-#                                trades a stall you can see for one you
-#                                cannot.
-#   tcp_fin_timeout=15           cargo cult. 60s is not what exhausts this box.
-#   tcp_mtu_probing=1            only earns its place behind a PMTU blackhole.
-# ---------------------------------------------------------------------------
 base_sysctl:
   # A .NET process reserves far more virtual address space than it touches.
   # Strict accounting (0) refuses those reservations and the runtime aborts.
@@ -99,20 +62,10 @@ base_sysctl:
   fs.file-max: "200000"
   fs.inotify.max_user_instances: "512"
 
-# ---------------------------------------------------------------------------
-# SWAP
-#
-# Not there to run from: it is there so a garbage-collection spike is paged
-# out instead of tripping the OOM killer. MemorySwapMax per app keeps any one
-# of them from living in it.
-# ---------------------------------------------------------------------------
 swap_size_mb: 2048
 swap_file: /swapfile
-# 10 = swap only under real pressure. The default 60 would page out idle
-# Kestrel heaps and make the first request after a quiet period slow.
 swap_swappiness: 10
 
-# journald is what Fluent Bit reads unit logs from.
 journald_settings:
   Storage: persistent
   Compress: "yes"
@@ -120,8 +73,6 @@ journald_settings:
   SystemMaxFileSize: 64M
   RuntimeMaxUse: 64M
   MaxRetentionSec: 7day
-  # journald drops messages in bursts and only warns afterwards, so it goes
-  # blind exactly during an incident.
   RateLimitIntervalSec: 30s
   RateLimitBurst: 20000
   ForwardToSyslog: "no"

@@ -15,8 +15,6 @@ MD=$(curl -sf --max-time 5 -H "Authorization: Bearer Oracle" \
   echo "FD=$(jq -r '.faultDomain // "unknown"' <<<"$MD")"
   echo "REGION=$(jq -r '.canonicalRegionName // "unknown"' <<<"$MD")"
   echo "ROLE=$(jq -r '.definedTags.pscloud.role // "unknown"' <<<"$MD")"
-  # Written into the instance configuration by `pscloud image-release`: which
-  # golden image this VM booted from.
   echo "RELEASE=$(jq -r '.metadata.pscloud_release // "unknown"' <<<"$MD")"
 } > /run/instance.env
 

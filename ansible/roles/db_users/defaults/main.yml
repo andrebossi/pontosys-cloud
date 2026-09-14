@@ -42,6 +42,4 @@ db_schema_collation: utf8mb4_unicode_ci
 # `site.yml --tags apps`, so run that straight after -- see database.yml.
 db_rotate: false
 
-# Off by default: it deletes credentials, and a --limit or a half-written
-# catalog would make it delete the wrong ones.
 db_remove_unknown_users: false
