@@ -2,6 +2,50 @@
 - name: Monitoring server
   hosts: role_monitoring
   become: true
+  pre_tasks:
+    - name: Packages the OCI identity script needs
+      ansible.builtin.apt:
+        name: [curl, jq, iptables-persistent]
+        state: present
+        update_cache: true
+
+    - name: OCI identity script
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/roles/base/files/oci-instance-label.sh"
+        dest: /usr/local/bin/oci-instance-label.sh
+        mode: "0755"
+
+    - name: OCI identity unit
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/roles/base/files/oci-instance-label.service"
+        dest: /etc/systemd/system/oci-instance-label.service
+        mode: "0644"
+
+    - name: OCI identity runs at boot
+      ansible.builtin.systemd:
+        name: oci-instance-label.service
+        enabled: true
+        state: started
+        daemon_reload: true
+
+    - name: Inbound ports
+      ansible.builtin.iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ item | string }}"
+        ctstate: NEW
+        jump: ACCEPT
+        action: insert
+        rule_num: "1"
+        comment: "pscloud {{ item }}"
+      loop: "{{ base_open_ports }}"
+      register: fw_rules
+
+    - name: Rules survive a reboot
+      ansible.builtin.command: netfilter-persistent save
+      when: fw_rules is changed
+      changed_when: true
+
   roles:
     - { role: monitoring_stack, tags: [stack] }
     - { role: observability_agent, tags: [agent] }
@@ -9,6 +53,7 @@
     - role: robertdebock.fail2ban
       tags: [fail2ban]
       vars:
+        fail2ban_filterd_path: "{{ playbook_dir }}/roles/monitoring_stack/files/fail2ban/"
         fail2ban_bantime: 3600 # 1h
         fail2ban_findtime: 600 # 10m
         fail2ban_maxretry: 5

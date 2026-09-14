@@ -69,13 +69,6 @@
   no_log: true
   notify: restart observability
 
-- name: Grafana fail2ban filter
-  ansible.builtin.copy:
-    src: grafana-local.conf
-    dest: /etc/fail2ban/filter.d/grafana-local.conf
-    mode: "0644"
-  notify: restart fail2ban
-
 - name: Valid compose file
   ansible.builtin.command:
     cmd: docker compose config --quiet

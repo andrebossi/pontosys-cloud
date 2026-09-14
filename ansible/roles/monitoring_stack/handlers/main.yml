@@ -4,11 +4,6 @@
     project_src: "{{ observability_dir }}"
     state: restarted
 
-- name: restart fail2ban
-  ansible.builtin.systemd:
-    name: fail2ban
-    state: restarted
-
 - name: restart docker
   ansible.builtin.systemd:
     name: docker
