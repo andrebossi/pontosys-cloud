@@ -29,7 +29,6 @@
     url: "{{ libssl_url }}"
     dest: /var/cache/libssl1.1.deb
     mode: "0644"
-  register: libssl_deb
 
 - name: Unpack it, private to the app units
   ansible.builtin.shell:

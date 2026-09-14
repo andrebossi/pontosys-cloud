@@ -14,9 +14,6 @@
 
 - name: Which of them no application claims
   ansible.builtin.set_fact:
-    claimed_users: >-
-      {{ db_apps | map(attribute='key') | map('extract', db_secrets)
-         | map(attribute='username') | list }}
     orphan_users: >-
       {{ existing_users.query_result | first
          | rejectattr('user', 'in', claimed) | list }}
