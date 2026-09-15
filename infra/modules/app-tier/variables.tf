@@ -103,6 +103,34 @@ variable "lb_bandwidth_mbps" {
   }
 }
 
+variable "grafana_backend_ip" {
+  description = "Private IP of the monitoring host. Null skips the Grafana backend set and listener entirely."
+  type        = string
+  default     = null
+}
+
+variable "grafana_backend_port" {
+  type    = number
+  default = 3000
+}
+
+variable "grafana_listener_port" {
+  description = "Public port on this same load balancer that forwards to Grafana. The freetier allows only one flexible LB, so Grafana shares it with the app instead of getting its own."
+  type        = number
+  default     = 3000
+}
+
+variable "grafana_health_check" {
+  type = object({
+    url_path    = optional(string, "/api/health")
+    return_code = optional(number, 200)
+    interval_ms = optional(number, 10000)
+    timeout_ms  = optional(number, 3000)
+    retries     = optional(number, 3)
+  })
+  default = {}
+}
+
 variable "lb_certificate" {
   type = object({
     certificate_name   = string

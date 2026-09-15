@@ -21,3 +21,37 @@ tahoma
 
 Já esta no graylog hospedado em outra VPS
 subir victoria metrics no rust-desk
+
+## Deploy de imagens
+
+deploy do frontend, e feito commit na pasta build/{production,rc}/{ionic,flutter}
+
+Deploy tem que ser unificado em backend e frontend
+
+backend: build separado.
+  - virtualstore | API
+  - relatoriosapi | API
+  - pixapi
+  - entradaapi
+  - dashsapi
+  - cadastrosapi
+
+Tradução das pastas e arquivos
+
+Virtualstore Frontend - ionic - separado
+* assets
+* build
+* index.html - raiz do nginx
+* manifest.json
+
+Virtualstore Frontend - flutter
+* app - separado
+app no mapeamento interno e flutter no repo
+
+-----
+Monitor Clientes - Frontend flutter - empacotar separado.
+* monitorclientes - separado
+
+Monitor Clientes backend
+* monitorclientesapi - separado
+* geradorrelatoriosapi - separado

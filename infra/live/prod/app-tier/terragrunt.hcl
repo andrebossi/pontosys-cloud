@@ -38,6 +38,13 @@ dependency "platform" {
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
 }
 
+dependency "monitoring" {
+  config_path = "../monitoring"
+
+  mock_outputs                            = { private_ips = { "01" = "10.20.16.30" } }
+  mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
+}
+
 dependencies {
   paths = ["../database"]
 }
@@ -62,8 +69,12 @@ inputs = {
 
   backend_port = local.env.app_port
 
-  pool_min_size = 2
-  pool_max_size = 3
+  grafana_backend_ip    = dependency.monitoring.outputs.private_ips["01"]
+  grafana_backend_port  = local.env.grafana_port
+  grafana_listener_port = local.env.grafana_port
+
+  pool_min_size = 1
+  pool_max_size = 1
 
   stable_fault_domains = ["FAULT-DOMAIN-1", "FAULT-DOMAIN-2", "FAULT-DOMAIN-3"]
   canary_fault_domains = ["FAULT-DOMAIN-3"]

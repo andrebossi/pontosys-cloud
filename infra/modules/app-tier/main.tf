@@ -106,6 +106,47 @@ resource "oci_load_balancer_listener" "https" {
   }
 }
 
+resource "oci_load_balancer_backend_set" "grafana" {
+  count = var.grafana_backend_ip == null ? 0 : 1
+
+  load_balancer_id = oci_load_balancer_load_balancer.this.id
+  name             = "${var.label_prefix}-bes-grafana"
+  policy           = "ROUND_ROBIN"
+
+  health_checker {
+    protocol          = "HTTP"
+    port              = var.grafana_backend_port
+    url_path          = var.grafana_health_check.url_path
+    return_code       = var.grafana_health_check.return_code
+    interval_ms       = var.grafana_health_check.interval_ms
+    timeout_in_millis = var.grafana_health_check.timeout_ms
+    retries           = var.grafana_health_check.retries
+  }
+}
+
+resource "oci_load_balancer_backend" "grafana" {
+  count = var.grafana_backend_ip == null ? 0 : 1
+
+  load_balancer_id = oci_load_balancer_load_balancer.this.id
+  backendset_name  = oci_load_balancer_backend_set.grafana[0].name
+  ip_address       = var.grafana_backend_ip
+  port             = var.grafana_backend_port
+}
+
+resource "oci_load_balancer_listener" "grafana" {
+  count = var.grafana_backend_ip == null ? 0 : 1
+
+  load_balancer_id         = oci_load_balancer_load_balancer.this.id
+  name                     = "grafana"
+  default_backend_set_name = oci_load_balancer_backend_set.grafana[0].name
+  port                     = var.grafana_listener_port
+  protocol                 = "HTTP"
+
+  connection_configuration {
+    idle_timeout_in_seconds = 60
+  }
+}
+
 resource "oci_core_instance_configuration" "baseline" {
   compartment_id = var.compartment_id
   display_name   = "${var.label_prefix}-ic-app-baseline"
@@ -136,11 +177,6 @@ resource "oci_core_instance_configuration" "baseline" {
         nsg_ids          = var.app_nsg_ids
       }
 
-      # No user_data. The golden image already carries the host
-      # configuration -- the firewall rule, the instance-identity unit and the
-      # agent -- applied by ansible/roles/base. A cloud-init copy of the same
-      # thing would be a second definition to keep in step, and it would only
-      # ever run on first boot.
       metadata = {
         ssh_authorized_keys = var.ssh_public_key
       }

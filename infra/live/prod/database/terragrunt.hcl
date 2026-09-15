@@ -48,12 +48,6 @@ inputs = {
   db_port       = local.env.db_port
   expose_nlb    = false
 
-  # Databases, users and grants are Ansible's: it is the only thing that runs
-  # inside the VCN and can reach the DB system, so it is the only thing that
-  # can create a credential and the account it belongs to together.
-  manage_databases = false
-  db_host          = local.env.db_fqdn
-
   backup = {
     retention_in_days = 7
     window_start_time = "04:00-00:00"

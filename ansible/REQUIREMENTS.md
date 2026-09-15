@@ -23,7 +23,7 @@ rename it on the other or nothing resolves.
 | Secret | Created by | When |
 |---|---|---|
 | `pscloud-mysql-admin` | Terraform (`platform`) | with the DB system |
-| `pscloud-ssh-app`, `pscloud-ssh-db` | Terraform (`platform`) | with the instances |
+| `pscloud-ssh-app`, `pscloud-ssh-db`, `pscloud-ssh-monitoring` | Terraform (`platform`) | with the instances |
 | `pscloud-db-<app>` | **Ansible** (`database.yml`) | first run, per application |
 | `pscloud-smtp-password` | **you, by hand** | before the first `site.yml` |
 | `pscloud-jwt-monitorclientes` | **you, by hand** | before the first `site.yml` |

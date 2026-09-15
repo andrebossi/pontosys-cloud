@@ -124,6 +124,56 @@ real addresses in it. Hostnames **are** addresses everywhere, matching the OCI
 plugin's `hostname_format: private_ip`, so `monitoring_host` resolves the same
 way in all three.
 
+### 4. Bastion
+
+prod and rc instances have no public IP, and Ansible does not proxy through
+the Bastion itself — there is no `ProxyCommand` in `group_vars/all.yml`, on
+purpose. Instead, **Ansible runs from the monitoring host**: it sits inside
+the same app subnet as everything else (see `app-in-ssh` /
+`monitoring-in-bastion` in `infra/live/prod/network`), so once you are on it,
+the OCI dynamic inventory's `private_ip` hostnames are reachable directly —
+including the monitoring host's own peers, and the application VMs.
+
+The Bastion is only the door onto that host from outside the VCN. Open a
+port forwarding session and hand it to `ssh`:
+
+```sh
+bastion_id=$(cd ../infra/live/prod/platform && terragrunt output -raw bastion_id)
+monitoring_ip=$(ansible-inventory -i inventories/production --list \
+  | jq -r '.role_monitoring.hosts[0]')
+
+session_id=$(oci bastion session create-port-forwarding-session \
+  --bastion-id "$bastion_id" \
+  --display-name "ssh-$(whoami)-$(date +%s)" \
+  --target-private-ip "$monitoring_ip" --target-port 22 \
+  --ssh-public-key-file ~/.ssh/id_rsa.pub \
+  --wait-for-state SUCCEEDED --wait-for-state FAILED \
+  --query 'data.resource.id' --raw-output)
+
+ssh -i ~/.ssh/pscloud-monitoring \
+  -o ProxyCommand="ssh -i ~/.ssh/id_rsa -W ${monitoring_ip}:22 ${session_id}@host.bastion.sa-saopaulo-1.oci.oraclecloud.com" \
+  ubuntu@"$monitoring_ip"
+```
+
+The session (to the Bastion service) authenticates with your own key,
+`~/.ssh/id_rsa`; the target itself authenticates with `ansible_ssh_private_key_file`
+— `~/.ssh/pscloud-<role>`, the same per-role key Terraform already put in the
+image's `authorized_keys`:
+
+```sh
+oci secrets secret-bundle get-secret-bundle-by-name \
+  --secret-name pscloud-ssh-monitoring --vault-id "$OCI_VAULT_OCID" \
+  --query 'data."secret-bundle-content".content' --raw-output \
+  | base64 -d > ~/.ssh/pscloud-monitoring
+chmod 600 ~/.ssh/pscloud-monitoring
+```
+
+Repeat for `pscloud-ssh-app` → `~/.ssh/pscloud-app`: with both keys on the
+monitoring host, it can reach the application VMs too, so `site.yml`,
+`database.yml` and `deploy.yml` all run from there against
+`inventories/production` / `inventories/rc` like any other host — Ansible
+itself, cloned or synced onto the box, plus its `.venv` (see Install above).
+
 ## Run
 
 ```sh
@@ -421,7 +471,11 @@ on `app_oom_kills_total`.
 
 ### The monitoring machine
 
-12 GB, arm64, shared with RustDesk. 6 GB is allocated:
+8 GB, arm64, dedicated (`VM.Standard.A1.Flex`, freetier, `infra/live/prod/monitoring`).
+Private like everything else — Grafana is reached through the app-tier load
+balancer's `grafana_listener_port`, not a public IP on the box itself. It also
+doubles as the Ansible control node for prod and rc — see Bastion above. 6 GB
+is allocated:
 
 ```
 victoriametrics  2.0 GB   -memory.allowedBytes=1400MB

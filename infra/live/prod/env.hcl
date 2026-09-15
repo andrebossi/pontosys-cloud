@@ -19,28 +19,16 @@ locals {
     db     = "10.20.32.0/24"
   }
 
-  legacy = {
-    vcn_id         = "ocid1.vcn.oc1.sa-saopaulo-1.amaaaaaayr5h27aaudqj7ndd3klx3d5mvodrqhyyykii5joz4mh7wydoz27a"
-    vcn_cidr       = "10.0.0.0/16"
-    subnet_id      = "ocid1.subnet.oc1.sa-saopaulo-1.aaaaaaaadzylb5yjig5aolxsspyvbwh4rphumcisvyhunv2clfxhqedsnnja"
-    route_table_id = "ocid1.routetable.oc1.sa-saopaulo-1.aaaaaaaayh47ermhj5djwm3l2lbv23xzquk4c2swdaywtitvyppb7ubt7uoa"
-    security_list  = "ocid1.securitylist.oc1.sa-saopaulo-1.aaaaaaaacbtvukbiuf6sjbnqn3mvkqok473ykdsrhawffnr6gl557figx7wa"
-    internet_gw    = "ig-rustdesk"
-  }
-
   admin_cidrs      = ["0.0.0.0/0"]
   lb_ingress_cidrs = ["0.0.0.0/0"]
   db_client_cidrs  = ["0.0.0.0/0"]
 
-  app_port = 80
-  db_port  = 3306
+  app_port     = 80
+  db_port      = 3306
+  grafana_port = 3000
 
-  # Where the applications reach the database. OCI composes it from the labels,
-  # so it is known before the DB system exists.
   db_fqdn = "${local.prefix}mysql.db.vcn.oraclevcn.com"
 
-  # One MySQL user per application, with a generated password and a vault
-  # secret. Databases are shared: several apps read virtualstoreglobal.
   applications = {
     virtualstore = {
       db_user   = "virtualstore_app"
