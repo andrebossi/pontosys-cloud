@@ -46,7 +46,7 @@ inputs = {
   nlb_subnet_id = dependency.network.outputs.subnet_ids.public
   nlb_nsg_ids   = [dependency.network.outputs.nsg_ids.db]
   db_port       = local.env.db_port
-  expose_nlb    = false
+  expose_nlb    = true
 
   backup = {
     retention_in_days = 7

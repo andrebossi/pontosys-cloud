@@ -218,13 +218,10 @@ resource "oci_core_instance_pool" "app" {
     pscloud_pool      = each.key
   })
 
-  dynamic "placement_configurations" {
-    for_each = each.value
-    content {
-      availability_domain = local.availability_domain
-      primary_subnet_id   = var.app_subnet_id
-      fault_domains       = [placement_configurations.value]
-    }
+  placement_configurations {
+    availability_domain = local.availability_domain
+    primary_subnet_id   = var.app_subnet_id
+    fault_domains       = each.value
   }
 
   load_balancers {
@@ -241,8 +238,8 @@ resource "oci_core_instance_pool" "app" {
         timeout    = var.drain_timeout_seconds
 
         on_timeout {
-          preserve_boot_volume_mode  = "DELETE"
-          preserve_block_volume_mode = "DELETE"
+          preserve_boot_volume_mode  = "DELETE_ALWAYS"
+          preserve_block_volume_mode = "DELETE_ALWAYS"
         }
       }
     }
