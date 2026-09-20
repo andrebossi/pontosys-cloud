@@ -27,5 +27,5 @@ inputs = {
 
   bastion_target_subnet_id = dependency.network.outputs.subnet_ids.app
 
-  freeform_tags = merge(local.env.tags, { Component = "platform" })
+  freeform_tags = { CostCenter = local.env.tags.CostCenter }
 }

@@ -54,5 +54,5 @@ inputs = {
     pitr_enabled      = true
   }
 
-  freeform_tags = merge(local.env.tags, { Component = "database" })
+  freeform_tags = { CostCenter = local.env.tags.CostCenter }
 }

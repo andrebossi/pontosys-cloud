@@ -111,5 +111,5 @@ inputs = {
     },
   )
 
-  freeform_tags = merge(local.env.tags, { Component = "app", Role = "app" })
+  freeform_tags = { CostCenter = local.env.tags.CostCenter }
 }

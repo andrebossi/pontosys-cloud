@@ -65,5 +65,5 @@ inputs = {
     },
   )
 
-  freeform_tags = merge(local.env.tags, { Component = "monitoring", Role = "monitoring" })
+  freeform_tags = { CostCenter = local.env.tags.CostCenter }
 }

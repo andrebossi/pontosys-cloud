@@ -63,5 +63,5 @@ inputs = {
     monitoring-out-any    = { nsg = "monitoring", direction = "EGRESS", protocol = "all", remotes = ["0.0.0.0/0"] }
   }
 
-  freeform_tags = merge(local.env.tags, { Component = "network" })
+  freeform_tags = { CostCenter = local.env.tags.CostCenter }
 }

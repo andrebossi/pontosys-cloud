@@ -21,5 +21,5 @@ inputs = {
     monitoring = { capabilities = ["read_secrets", "read_inventory", "read_metrics", "artifacts_bucket"] }
   }
 
-  freeform_tags = merge(local.env.tags, { Component = "identity" })
+  freeform_tags = { CostCenter = local.env.tags.CostCenter }
 }

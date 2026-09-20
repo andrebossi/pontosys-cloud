@@ -42,5 +42,5 @@ inputs = {
     http = { port = 80 }
   }
 
-  freeform_tags = merge(local.env.tags, { Component = "lb" })
+  freeform_tags = { CostCenter = local.env.tags.CostCenter }
 }

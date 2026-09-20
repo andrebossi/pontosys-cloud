@@ -37,7 +37,7 @@ resource "oci_load_balancer_load_balancer" "this" {
   subnet_ids                 = [var.lb_subnet_id]
   network_security_group_ids = var.lb_nsg_ids
   is_private                 = var.is_private
-  freeform_tags              = merge(var.freeform_tags, { pscloud_component = "app-lb" })
+  freeform_tags              = var.freeform_tags
 
   shape_details {
     minimum_bandwidth_in_mbps = var.lb_bandwidth_mbps.minimum
@@ -150,7 +150,7 @@ resource "oci_load_balancer_listener" "grafana" {
 resource "oci_core_instance_configuration" "baseline" {
   compartment_id = var.compartment_id
   display_name   = "${var.label_prefix}-ic-app-baseline"
-  freeform_tags  = merge(var.freeform_tags, { pscloud_component = "app-ic" })
+  freeform_tags  = var.freeform_tags
 
   instance_details {
     instance_type = "compute"
@@ -213,10 +213,7 @@ resource "oci_core_instance_pool" "app" {
   display_name              = "${var.label_prefix}-pool-${each.key}"
   size                      = each.key == "stable" ? var.pool_min_size : 0
 
-  freeform_tags = merge(var.freeform_tags, {
-    pscloud_component = "app-pool"
-    pscloud_pool      = each.key
-  })
+  freeform_tags = var.freeform_tags
 
   placement_configurations {
     availability_domain = local.availability_domain
@@ -257,7 +254,7 @@ resource "oci_autoscaling_auto_scaling_configuration" "app" {
   display_name         = "${var.label_prefix}-as-app"
   cool_down_in_seconds = var.autoscaling.cool_down_in_seconds
   is_enabled           = var.autoscaling.is_enabled
-  freeform_tags        = merge(var.freeform_tags, { pscloud_component = "app-autoscaling" })
+  freeform_tags        = var.freeform_tags
 
   auto_scaling_resources {
     id   = oci_core_instance_pool.app["stable"].id
