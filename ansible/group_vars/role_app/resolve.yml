@@ -1,0 +1,18 @@
+---
+app_channel: >-
+  {{ 'canary' if 'pool_canary' in group_names
+     else 'rc' if app_env == 'rc'
+     else 'stable' }}
+
+release_groups_by_channel:
+  rc: "{{ release_groups_rc }}"
+  canary: "{{ release_groups_canary }}"
+  stable: "{{ release_groups_stable }}"
+
+release_versions_for_channel: >-
+  {{
+    release_groups_by_channel[app_channel].values()
+    | map('dict2items') | sum(start=[]) | items2dict
+  }}
+
+resolved_version: "{{ deploy_versions | default(release_versions_for_channel) }}"

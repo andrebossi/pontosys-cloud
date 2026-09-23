@@ -1,0 +1,3 @@
+---
+nginx_static_root: /usr/share/nginx/html
+nginx_user: nginx

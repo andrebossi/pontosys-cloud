@@ -1,0 +1,65 @@
+---
+- name: "{{ site.key }}"
+  vars:
+    dest: "{{ (site.value.path == '/') | ternary(nginx_static_root, nginx_static_root + site.value.path) }}"
+    version: "{{ resolved_version[site.key] }}"
+  block:
+    - name: "{{ site.key }} — namespace"
+      oracle.oci.oci_object_storage_namespace_facts:
+        auth_type: "{{ oci_auth_type }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+      register: ns
+      when: oci_namespace is not defined
+
+    - name: "{{ site.key }} — remember it"
+      ansible.builtin.set_fact:
+        oci_namespace: "{{ ns.namespace }}"
+      when: oci_namespace is not defined
+
+    - name: "{{ site.key }} — destination directory"
+      ansible.builtin.file:
+        path: "{{ dest }}"
+        state: directory
+        owner: "{{ nginx_user }}"
+        group: "{{ nginx_user }}"
+
+    - name: "{{ site.key }} — download {{ version }}"
+      oracle.oci.oci_object_storage_object:
+        namespace_name: "{{ oci_namespace }}"
+        bucket_name: "{{ artifact_bucket }}"
+        object_name: "artifacts/{{ site.key }}/{{ site.key }}-{{ version }}.tar.gz"
+        dest: "{{ artifact_cache }}/{{ site.key }}-{{ version }}.tar.gz"
+        state: present
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+    - name: "{{ site.key }} — unpack"
+      ansible.builtin.unarchive:
+        src: "{{ artifact_cache }}/{{ site.key }}-{{ version }}.tar.gz"
+        dest: "{{ dest }}"
+        owner: "{{ nginx_user }}"
+        group: "{{ nginx_user }}"
+        extra_opts: [--no-same-owner]
+        creates: "{{ dest }}/.version-{{ version }}"
+      register: site_unpack
+
+    - name: "{{ site.key }} — stamp it"
+      ansible.builtin.file:
+        path: "{{ dest }}/.version-{{ version }}"
+        state: touch
+        mode: "0644"
+        modification_time: preserve
+        access_time: preserve
+      changed_when: false
+
+    - name: "{{ site.key }} — readable by nginx"
+      ansible.builtin.file:
+        path: "{{ dest }}"
+        owner: "{{ nginx_user }}"
+        group: "{{ nginx_user }}"
+        recurse: true
+      when: site_unpack is changed

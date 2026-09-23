@@ -1,0 +1,94 @@
+name: rc
+
+# The only way a version enters versions_rc.yml, and the only thing that can
+# ever run unattended -- canary and stable only ever move through
+# promote.yml, a manual action every time. Each app repo's publish.yml fires
+# this via repository_dispatch right after it uploads a new artifact: this
+# commits that one release_groups_rc[group][app] line directly to main (same
+# pattern promote.yml already uses for versions_canary.yml/versions_stable.yml
+# -- no PR, no auto-merge wait) and deploys it to rc in the same run.
+#
+# workflow_dispatch re-runs rc without moving any version -- e.g. after an
+# infra-only change, with no version movement involved.
+
+on:
+  repository_dispatch:
+    types: [bump-rc]
+  workflow_dispatch:
+    inputs:
+      apps:
+        description: 'Limit to some apps, e.g. ["pixapi"]. Empty means all.'
+        default: ""
+
+env:
+  OCI_CI_TENANCY_OCID: ${{ secrets.OCI_CI_TENANCY_OCID }}
+  OCI_CI_USER_OCID: ${{ secrets.OCI_CI_USER_OCID }}
+  OCI_CI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
+  OCI_CI_PRIVATE_KEY: ${{ secrets.OCI_CI_PRIVATE_KEY }}
+  OCI_CI_REGION: ${{ vars.OCI_CI_REGION }}
+  OCI_VAULT_OCID: ${{ vars.OCI_VAULT_OCID }}
+  OCI_MONITORING_IP: ${{ vars.OCI_MONITORING_IP }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: rc
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Bump one app's rc version
+        if: github.event_name == 'repository_dispatch'
+        working-directory: ansible
+        run: |
+          set -euo pipefail
+          group='${{ github.event.client_payload.group }}'
+          app='${{ github.event.client_payload.app }}'
+          version='${{ github.event.client_payload.version }}'
+          if [ "$(yq ".release_groups_rc.\"$group\" // \"\"" group_vars/role_app/versions_rc.yml)" = "" ]; then
+            echo "No such group '$group' in release_groups_rc." >&2
+            exit 1
+          fi
+          yq -i ".release_groups_rc.\"$group\".\"$app\" = \"$version\"" group_vars/role_app/versions_rc.yml
+
+      - name: Commit
+        if: github.event_name == 'repository_dispatch'
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name "pscloud-bot"
+          git config user.email "bot@pontosys.com"
+          git add ansible/group_vars/role_app/versions_rc.yml
+          git commit -m "rc: ${{ github.event.client_payload.app }} -> ${{ github.event.client_payload.version }}"
+          git push origin HEAD:main
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Determine deploy filter
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo 'arg=-e deploy_apps=["${{ github.event.client_payload.app }}"]' >> "$GITHUB_OUTPUT"
+          elif [ -n "${{ inputs.apps }}" ]; then
+            echo 'arg=-e deploy_apps=${{ inputs.apps }}' >> "$GITHUB_OUTPUT"
+          else
+            echo "arg=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Versions being installed
+        working-directory: ansible
+        run: |
+          yq '.release_groups_rc | to_entries | map(.value | to_entries | map(.key + " " + .value)) | flatten | .[]' \
+            group_vars/role_app/versions_rc.yml >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deploy to rc
+        uses: ./.github/actions/run-on-monitoring
+        with:
+          command: |
+            set -euo pipefail
+            cd ~/pscloud && git fetch --quiet && git checkout --quiet '${{ steps.commit.outputs.sha || github.sha }}'
+            cd ansible && source .venv/bin/activate
+            ansible-galaxy install -r requirements.yml
+            ansible-playbook -i inventories/rc deploy.yml -l role_app -e deploy_serial=1 ${{ steps.filter.outputs.arg }}

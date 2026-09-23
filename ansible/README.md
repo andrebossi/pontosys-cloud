@@ -7,14 +7,14 @@ is a new machine image, not a machine that was changed.
 ```
 site.yml                     the application servers, end to end
 database.yml                 schemas, MySQL accounts and the credentials
-monitoring.yml               the monitoring server
-deploy.yml                   application versions on existing machines
-image.yml                    the golden image, run by Packer
+monitoring.yml                the monitoring server
+deploy.yml                    app + frontend versions on existing machines
+image.yml                     the golden image, run by Packer
 
-group_vars/                  SHARED — identical in every environment
-inventories/production/      prod: hosts + the vars only prod has
-inventories/rc/              rc: production machines taking real traffic
-inventories/local/           Vagrant VMs on the workstation
+group_vars/                   SHARED — identical in every environment
+inventories/production/       prod: hosts + the vars only prod has
+inventories/rc/                rc: its own inventory, never a pool
+inventories/local/            Vagrant VMs on the workstation
 roles/
 ```
 
@@ -126,13 +126,14 @@ way in all three.
 
 ### 4. Bastion
 
-prod and rc instances have no public IP, and Ansible does not proxy through
-the Bastion itself — there is no `ProxyCommand` in `group_vars/all.yml`, on
-purpose. Instead, **Ansible runs from the monitoring host**: it sits inside
-the same app subnet as everything else (see `app-in-ssh` /
-`monitoring-in-bastion` in `infra/live/prod/network`), so once you are on it,
-the OCI dynamic inventory's `private_ip` hostnames are reachable directly —
-including the monitoring host's own peers, and the application VMs.
+The application VMs have no public IP, and Ansible does not proxy through
+the Bastion for them — there is no `ProxyCommand` in `group_vars/all.yml`,
+on purpose. Instead, **Ansible runs from the monitoring host**: even though
+it now sits in the public subnet (section 5) rather than the app one, its
+NSG still reaches every app host's private IP directly on the app subnet's
+own terms (see `app-in-ssh` in `infra/live/prod/network`), so once you are on
+it, the OCI dynamic inventory's `private_ip` hostnames are reachable
+directly.
 
 The Bastion is only the door onto that host from outside the VCN. Open a
 port forwarding session and hand it to `ssh`:
@@ -173,6 +174,82 @@ monitoring host, it can reach the application VMs too, so `site.yml`,
 `database.yml` and `deploy.yml` all run from there against
 `inventories/production` / `inventories/rc` like any other host — Ansible
 itself, cloned or synced onto the box, plus its `.venv` (see Install above).
+
+This box also has a public IP now (section 5), so `ssh -i ~/.ssh/pscloud-monitoring
+ubuntu@<its public IP>` works directly too, no Bastion session needed — this
+section stays useful as the private-network path when that's preferred.
+
+### 5. How pipelines reach this host
+
+Deliberately not through the Bastion, and not a self-hosted runner either —
+confirmed: a persistent runner installed on this box is more attack surface
+than this needs, and routing every CI run through a fresh Bastion session
+added a round-trip for no real gain once the box has its own public IP
+anyway. Instead, this box has a public IP (see `infra/live/prod/monitoring`)
+and the GitHub Actions workflows (`rollout.yml`, `canary.yml`, `promote.yml`,
+`image.yml`) SSH straight to it — one composite action,
+`.github/actions/run-on-monitoring`, does that; every workflow that needs
+`ansible-playbook` or `packer` calls it instead of repeating it. It assumes
+this box already has a persistent clone of this repo plus its own `.venv`
+(see Install above) — a one-time bootstrap, the same category of setup this
+box already needed by hand.
+
+The SSH key is still the same `pscloud-ssh-monitoring` Vault secret a human
+uses (section 4) — fetched with the existing CI OCI API key, the only OCI
+credential that lives in GitHub at all. Being public changes what has to
+hold the line at the host itself, not just the network: `sshd` here has
+`fail2ban` in front of it (`monitoring.yml`), and the `monitoring` NSG's
+`0.0.0.0/0:22` rule (`infra/live/prod/network`) is the only public ingress
+this box has. Calls that don't need to touch this box at all (`publish.yml`'s
+upload, `canary.yml`'s pool/load-balancer control) use the same CI key
+directly from a plain `ubuntu-latest` runner over plain HTTPS, no SSH
+involved.
+
+### 6. Release groups and canary
+
+Each channel keeps its own version record — `versions_rc.yml`,
+`versions_canary.yml`, `versions_stable.yml`, all the same shape
+(`release_groups_<channel>`) — see "## Versions" below. `promote.yml` never
+reads a version live off a host: it copies one release group from the
+source channel's file into the target channel's own file, commits that,
+then deploys. Nothing moves into canary or stable except by running
+`promote.yml`; nothing moves at all except by running one of `rollout.yml`,
+`canary.yml` or `promote.yml`.
+
+`pool_canary`/`pool_stable` are inventory groups, keyed off the
+`pscloud_pool` freeform tag `infra/modules/app-tier` sets on each pool's
+instance configuration — the same tag-driven pattern the `role_*` groups
+already use. rc is never a pool; it's its own inventory (`inventories/rc`).
+A host resolves its own channel's file automatically (`app_channel` in
+`group_vars/role_app/resolve.yml`), so `deploy.yml` never needs an explicit
+version passed in — by the time it runs, the right file already has it.
+
+Rollout `serial` (how fast a version rolls out across the hosts a pool
+*already* has) and load-balancer `weight` (what share of real traffic a pool
+gets) are different knobs: `promote.yml`'s `weight` input is the former,
+`canary.yml action=traffic`'s `weight_percent` is the latter.
+
+The full flow:
+
+```
+canary.yml action=up                       scales pool_canary to 1
+canary.yml action=traffic weight_percent=10 sends 10% of real traffic there
+promote.yml to=canary                       versions_rc.yml -> versions_canary.yml, deploys it
+  ...validate...
+canary.yml action=snapshot                  optional: image the validated canary
+promote.yml to=stable                       versions_canary.yml -> versions_stable.yml, deploys it
+canary.yml action=traffic weight_percent=0
+canary.yml action=down
+```
+
+or, for a low-risk change where the ceremony isn't worth it:
+
+```
+promote.yml to=stable from=rc               versions_rc.yml -> versions_stable.yml directly
+```
+
+Same action either way, just a different `from` — `promote.yml` doesn't
+care whether canary was used first.
 
 ## Run
 
@@ -215,22 +292,21 @@ ansible-playbook -i inventories/local site.yml -u ubuntu
 | `base` | accounts and sudo, sysctl, swap, journald, firewall, OCI identity |
 | `dotnet_runtime` | the .NET 5 and 2.1 runtimes, OpenSSL 1.1, libgdiplus, the report fonts |
 | `dotnet_app` | the systemd slice, unit template, drop-ins, settings, env files |
-| `app_deploy` | fetch a version, switch, health-check, roll back |
-| `nginx_app` | nginx, routing, error pages, the web root |
+| `app_deploy` | fetch a version, switch, health-check, roll back -- backend apps and frontends alike |
+| `nginx_app` | installs and configures nginx: the package, routing, error pages. Never deploys anything -- see `app_deploy` |
 | `db_users` | schemas, one MySQL account per application, and their credentials |
 | `observability_agent` | Fluent Bit: unit logs, host and per-app metrics |
 | `monitoring_stack` | Docker and the observability backend |
 
 ## Versions
 
-There is no manifest service and no `latest` resolution. **The version is in the
-catalog**, and git is the record of what every environment ran:
+There is no manifest service and no `latest` resolution. **What an application
+is** lives in the catalog, forever version-free:
 
 ```yaml
 # group_vars/role_app/applications.yml
 applications:
   pixapi:
-    version: "2026.09.12"
     dll: VirtualStore.Integrations.Pix.Api.dll
     port: 5008
     path: /pixapi
@@ -247,7 +323,37 @@ applications:
     secrets:
       SmtpClientData__MailPass: smtp-password
 
-webroot_version: "2026.09.12"
+static_sites:
+  root:            { path: /,               index: /index.html }
+  app:             { path: /app,            index: /app/index.html }
+  monitorclientes: { path: /monitorclientes, index: /monitorclientes/index.html }
+```
+
+**What version is running where** lives in three committed files, one per
+channel — `versions_rc.yml`, `versions_canary.yml`, `versions_stable.yml` —
+same shape, each keyed `release_groups_<channel>`. rc's is the complete
+catalog; canary's and stable's start empty and only ever gain an entry
+through a `promote.yml` run (see "### 6. Release groups and canary" above).
+Organized by **release group**: a group names its member apps *and* each
+one's own version, so a frontend and the backend(s) it always ships with can
+be promoted together as one release even though each still publishes on its
+own schedule:
+
+```yaml
+# group_vars/role_app/versions_rc.yml
+release_groups_rc:
+  monitorclientes:              # Flutter frontend + both its backends
+    monitorclientes: "2026.09.12"
+    monitorclientesapi: "2026.09.10"
+    geradorrelatoriosapi: "2026.09.11"
+  pixapi:                       # most groups have one member
+    pixapi: "2026.09.12"
+
+# group_vars/role_app/versions_canary.yml -- empty until promoted
+release_groups_canary:
+  pixapi:
+    pixapi: "2026.09.10"        # an earlier rc version -- canary hasn't
+                                 # caught up yet, and that's fine
 ```
 
 **Every secret an application uses is named in its own entry.** Nothing is
@@ -255,12 +361,16 @@ derived from the application's name, so `grep db-virtualstore` finds every use
 of it, and the `<prefix>-` half is added in one place — the catalog is the same
 in every environment.
 
-Releasing is: CI uploads a tarball, someone bumps the number, the rollout runs.
-Rolling back is checking out the previous commit and running it again. Adding an
-application is one entry — it produces the systemd unit and its limits, the
-nginx upstream and `location`, the database account and its credential, the env
-file, the appsettings overlay, the `app` label on logs and metrics, and the
-deploy target. No role, task or template changes.
+Releasing to rc is: CI uploads a tarball, `bump-rc.yml` opens a PR bumping one
+line, it merges, `rollout.yml` runs on its own. Rolling rc back is checking
+out a previous commit of `versions_rc.yml` and running `rollout.yml` again.
+Canary and stable move only through `promote.yml`, which commits the copy
+itself — `git log` on either file is exactly as good a record for them as it
+already is for rc. Adding an application is one entry plus one line in
+whichever release group it belongs to — it produces the systemd unit and its
+limits, the nginx upstream and `location`, the database account and its
+credential, the env file, the appsettings overlay, the `app` label on logs
+and metrics, and the deploy target. No role, task or template changes.
 
 ## The bucket
 
@@ -268,12 +378,12 @@ deploy target. No role, task or template changes.
 artifacts/<name>/<name>-<version>.tar.gz
 ```
 
-Nine artifacts: the eight publish trees, and `webroot` — the Ionic storefront at
-`/` plus the two Flutter builds at `/app` and `/monitorclientes`, in one tarball
-unpacked over the document root.
+Eleven artifacts: the eight publish trees, plus the three frontends,
+separately now — `root` (the Ionic storefront at `/`), `app` and
+`monitorclientes` (the two Flutter builds, at `/app` and `/monitorclientes`).
 
-Tarballs are packed from **inside** each directory, so the entry assembly lands
-at the root of the release:
+Tarballs are packed from **inside** each directory, so the entry assembly (or,
+for a frontend, the site's own files) lands at the root of the release:
 
 ```sh
 tar -C out -czf pixapi.tar.gz .
@@ -472,10 +582,11 @@ on `app_oom_kills_total`.
 ### The monitoring machine
 
 8 GB, arm64, dedicated (`VM.Standard.A1.Flex`, freetier, `infra/live/prod/monitoring`).
-Private like everything else — Grafana is reached through the app-tier load
-balancer's `grafana_listener_port`, not a public IP on the box itself. It also
-doubles as the Ansible control node for prod and rc — see Bastion above. 6 GB
-is allocated:
+Unlike everything else, it has a public IP — Grafana is reached directly on
+it (`monitoring-in-grafana` in `infra/live/prod/network`), and so is SSH,
+which is how CI pipelines reach it (section 5) with no bastion and no
+self-hosted runner. It also doubles as the Ansible control node for prod and
+rc — see section 4. 6 GB is allocated:
 
 ```
 victoriametrics  2.0 GB   -memory.allowedBytes=1400MB
@@ -494,7 +605,8 @@ both lean on hardest — they are mmap-based.
 
 | Change | File |
 |---|---|
-| an application version, or a new application | `group_vars/role_app/applications.yml` |
+| a new application, or what it's not versioned by | `group_vars/role_app/applications.yml` |
+| an application's version | `group_vars/role_app/versions_<channel>.yml` |
 | what an application may spend | `app_tiers` in `platform.yml` |
 | an nginx timeout, the runtime version | `platform.yml` |
 | an appsettings value, a database, a secret name | `config.yml` |

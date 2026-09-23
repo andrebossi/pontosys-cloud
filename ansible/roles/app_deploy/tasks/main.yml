@@ -1,7 +1,14 @@
 ---
-- name: Deploy
+- name: Backend apps
   ansible.builtin.include_tasks: app.yml
-  loop: "{{ deploy_apps }}"
+  loop: "{{ deploy_apps | select('in', applications.keys()) | select('in', resolved_version.keys()) | list }}"
   loop_control:
     loop_var: app_name
-    label: "{{ app_name }} {{ applications[app_name].version }}"
+    label: "{{ app_name }} {{ resolved_version[app_name] }}"
+
+- name: Frontends
+  ansible.builtin.include_tasks: static_site.yml
+  loop: "{{ static_sites | dict2items | selectattr('key', 'in', deploy_apps) | selectattr('key', 'in', resolved_version.keys()) | list }}"
+  loop_control:
+    loop_var: site
+    label: "{{ site.key }} {{ resolved_version[site.key] }}"

@@ -1,6 +1,5 @@
 ---
-# Which applications this run touches. One app is -e "deploy_apps=['pixapi']".
-deploy_apps: "{{ applications.keys() | list }}"
+deploy_apps: "{{ (applications.keys() | list) + (static_sites.keys() | list) }}"
 
 app_deploy_root: /srv/apps
 app_deploy_user: dotnetapp

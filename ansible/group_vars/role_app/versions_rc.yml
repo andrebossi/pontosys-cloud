@@ -1,0 +1,21 @@
+---
+release_groups_rc:
+  virtualstore-frontend:
+    root: "2026.09.12"
+    app: "2026.09.12"
+  virtualstore:
+    virtualstore: "2026.09.12"
+  relatoriosapi:
+    relatoriosapi: "2026.09.12"
+  pixapi:
+    pixapi: "2026.09.12"
+  entradaapi:
+    entradaapi: "2026.09.12"
+  dashsapi:
+    dashsapi: "2026.09.12"
+  cadastrosapi:
+    cadastrosapi: "2026.09.12"
+  monitorclientes:
+    monitorclientes: "2026.09.12"
+    monitorclientesapi: "2026.09.12"
+    geradorrelatoriosapi: "2026.09.12"

@@ -1,9 +1,9 @@
 ---
 - name: "{{ app_name }}"
   vars:
-    app: "{{ applications[app_name] }}"
+    app: "{{ applications[app_name] | combine({'version': resolved_version[app_name]}) }}"
     home: "{{ app_deploy_root }}/{{ app_name }}"
-    release: "{{ app_deploy_root }}/{{ app_name }}/releases/{{ applications[app_name].version }}"
+    release: "{{ app_deploy_root }}/{{ app_name }}/releases/{{ resolved_version[app_name] }}"
   block:
     - name: "{{ app_name }} — release directory"
       ansible.builtin.file:

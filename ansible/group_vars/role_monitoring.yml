@@ -5,6 +5,8 @@ grafana_log_max_days: 7
 
 monitoring_mem_budget_mb: 6144
 
+monitoring_data_volume_size_gb: 80
+
 vm_mem_limit: 2G
 vm_mem_allowed: 1400MB
 vm_cpus: "1.0"
@@ -21,7 +23,7 @@ grafana_mem_limit: 768M
 vm_min_free_disk: 10GB
 vm_retention: 10d
 vl_max_disk_pct: 80
-vl_retention: 10d
+vl_retention: 15d
 
 fluentbit_backend_inputs:
   - name: prometheus_scrape

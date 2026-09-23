@@ -19,6 +19,9 @@ keyed_groups:
   - key: defined_tags['pscloud']['role']
     prefix: role
     separator: "_"
+  - key: freeform_tags['pscloud_pool'] | default('none')
+    prefix: pool
+    separator: "_"
 
 compose:
   ansible_host: private_ip

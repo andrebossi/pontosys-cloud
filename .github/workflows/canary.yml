@@ -1,0 +1,130 @@
+name: canary
+
+# Owns the canary pool's lifecycle and the load balancer's traffic split --
+# never app versions (that's promote.yml). Plain OCI control-plane calls
+# (compute + load-balancer management), reachable over HTTPS from a plain
+# ubuntu-latest runner with the existing CI OCI API key -- no bastion/SSH
+# needed for anything in this workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        required: true
+        type: choice
+        options: [up, down, traffic, snapshot]
+      weight_percent:
+        description: "traffic only: % of real load-balancer traffic to send to pool_canary"
+        default: "10"
+
+env:
+  OCI_CI_TENANCY_OCID: ${{ secrets.OCI_CI_TENANCY_OCID }}
+  OCI_CI_USER_OCID: ${{ secrets.OCI_CI_USER_OCID }}
+  OCI_CI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
+  OCI_CI_PRIVATE_KEY: ${{ secrets.OCI_CI_PRIVATE_KEY }}
+  OCI_CI_REGION: ${{ vars.OCI_CI_REGION }}
+  OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
+  OCI_CANARY_POOL_ID: ${{ vars.OCI_CANARY_POOL_ID }}
+  OCI_STABLE_POOL_ID: ${{ vars.OCI_STABLE_POOL_ID }}
+  OCI_LB_ID: ${{ vars.OCI_LB_ID }}
+  OCI_APP_BACKEND_SET_NAME: ${{ vars.OCI_APP_BACKEND_SET_NAME }}
+
+jobs:
+  canary:
+    runs-on: ubuntu-latest
+    steps:
+      - name: OCI CLI setup
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_CI_PRIVATE_KEY" > ~/.oci/ci_key.pem
+          chmod 600 ~/.oci/ci_key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_CI_USER_OCID
+          fingerprint=$OCI_CI_FINGERPRINT
+          tenancy=$OCI_CI_TENANCY_OCID
+          region=$OCI_CI_REGION
+          key_file=~/.oci/ci_key.pem
+          EOF
+          chmod 600 ~/.oci/config
+
+      - name: up -- scale pool_canary to 1
+        if: inputs.action == 'up'
+        run: |
+          oci compute-management instance-pool update \
+            --instance-pool-id "$OCI_CANARY_POOL_ID" --size 1 \
+            --wait-for-state RUNNING --force
+          echo "pool_canary is up. It carries 0% of real traffic until you run this workflow again with action=traffic."
+
+      - name: down -- scale pool_canary to 0
+        if: inputs.action == 'down'
+        run: |
+          oci compute-management instance-pool update \
+            --instance-pool-id "$OCI_CANARY_POOL_ID" --size 0 \
+            --wait-for-state RUNNING --force
+
+      - name: traffic -- set the load balancer's canary weight
+        if: inputs.action == 'traffic'
+        env:
+          WEIGHT_PERCENT: ${{ inputs.weight_percent }}
+        run: |
+          set -euo pipefail
+          weight=$WEIGHT_PERCENT
+          case "$weight" in ''|*[!0-9]*) echo "weight_percent must be a plain number 0-100, got '$weight'" >&2; exit 1 ;; esac
+
+          canary_ips=$(oci compute-management instance-pool list-instances \
+            --compartment-id "$OCI_COMPARTMENT_OCID" --instance-pool-id "$OCI_CANARY_POOL_ID" \
+            --query 'data[].id' --raw-output | jq -r '.[]' | \
+            while read -r id; do
+              oci compute instance list-vnics --instance-id "$id" --query 'data[0]."private-ip"' --raw-output
+            done)
+
+          mapfile -t backends < <(oci lb backend-set get --load-balancer-id "$OCI_LB_ID" \
+            --backend-set-name "$OCI_APP_BACKEND_SET_NAME" --query 'data.backends[].name' --raw-output | jq -r '.[]')
+
+          canary_backends=(); stable_backends=()
+          for b in "${backends[@]}"; do
+            ip="${b%:*}"
+            if grep -qx "$ip" <<< "$canary_ips"; then canary_backends+=("$b"); else stable_backends+=("$b"); fi
+          done
+
+          if [ "${#canary_backends[@]}" -eq 0 ] && [ "$weight" -gt 0 ]; then
+            echo "No canary backends registered in the load balancer -- run action=up first." >&2
+            exit 1
+          fi
+
+          # OCI backend weight is 1-100, never 0 -- weight_percent=0 gets the
+          # canary backend(s) down to the minimum (1), not literally zero
+          # traffic. For a hard guarantee of no traffic, scale the pool to 0
+          # with action=down instead: an empty pool has no backends at all.
+          for b in "${canary_backends[@]:-}"; do
+            [ -n "$b" ] || continue
+            w=$(( weight / ${#canary_backends[@]} )); [ "$w" -lt 1 ] && w=1
+            oci lb update-backend --load-balancer-id "$OCI_LB_ID" --backend-set-name "$OCI_APP_BACKEND_SET_NAME" \
+              --backend-name "$b" --weight "$w" --wait-for-state SUCCEEDED
+          done
+          for b in "${stable_backends[@]:-}"; do
+            [ -n "$b" ] || continue
+            w=$(( (100 - weight) / ${#stable_backends[@]} )); [ "$w" -lt 1 ] && w=1
+            oci lb update-backend --load-balancer-id "$OCI_LB_ID" --backend-set-name "$OCI_APP_BACKEND_SET_NAME" \
+              --backend-name "$b" --weight "$w" --wait-for-state SUCCEEDED
+          done
+
+      - name: snapshot -- image the validated canary
+        if: inputs.action == 'snapshot'
+        run: |
+          set -euo pipefail
+          instance_id=$(oci compute-management instance-pool list-instances \
+            --compartment-id "$OCI_COMPARTMENT_OCID" --instance-pool-id "$OCI_CANARY_POOL_ID" \
+            --query 'data[0].id' --raw-output)
+          [ "$instance_id" != "null" ] || { echo "pool_canary has no instance -- run action=up first." >&2; exit 1; }
+          release=$(date +%Y%m%d%H%M%S)
+          image_id=$(oci compute instance create-image --instance-id "$instance_id" \
+            --display-name "pscloud-app-canary-$release" \
+            --freeform-tags "{\"pscloud_family\":\"app\",\"pscloud_built_by\":\"canary-snapshot\",\"pscloud_release\":\"$release\"}" \
+            --wait-for-state AVAILABLE --query 'data.id' --raw-output)
+          {
+            echo "## Canary snapshot"
+            echo "\`$image_id\`"
+            echo "Set \`app_image_id\` in \`infra/live/prod/app-tier/terragrunt.hcl\` and apply if you want it."
+          } >> "$GITHUB_STEP_SUMMARY"

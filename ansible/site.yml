@@ -1,9 +1,9 @@
 ---
 # The application servers.
 #
-#   ansible-playbook site.yml
-#   ansible-playbook site.yml --limit env_rc
-#   ansible-playbook site.yml --tags nginx
+#   ansible-playbook -i inventories/production site.yml
+#   ansible-playbook -i inventories/rc site.yml
+#   ansible-playbook -i inventories/production site.yml --tags nginx
 - name: Application servers
   hosts: role_app
   become: true

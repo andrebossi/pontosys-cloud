@@ -1,4 +1,7 @@
 ---
+- name: Second disk for metrics and logs
+  ansible.builtin.include_tasks: disk.yml
+
 - name: The container limits fit the machine
   ansible.builtin.assert:
     that: container_mb <= monitoring_mem_budget_mb
@@ -39,7 +42,6 @@
     directory_mode: "0755"
   notify: restart observability
 
-# Both files below need these facts, so they are resolved first.
 - name: Grafana administrator password
   ansible.builtin.include_tasks: secret.yml
   vars:
@@ -59,8 +61,6 @@
     mode: "0644"
   notify: restart observability
 
-# All sizing (retention, disk ceiling, memory and CPU limits) lives here. The
-# docker-compose.yml stays generic and runs the same on any host.
 - name: Backend budget
   ansible.builtin.template:
     src: env.j2

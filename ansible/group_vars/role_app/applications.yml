@@ -1,8 +1,8 @@
 ---
-# One entry per application. The version is right here: bumping it and running
-# deploy.yml is a release, and git is the record of what every environment ran.
+# One entry per application -- what it is, never what version is running
+# where. Versions live in versions_rc.yml (release_groups_rc), organized by
+# release group; see ansible/README.md's "## Versions" section.
 #
-#   version      the tarball in the bucket: artifacts/<name>/<name>-<version>.tar.gz
 #   dll          entry assembly, as produced by dotnet publish
 #   port         Kestrel port on 127.0.0.1, the same ones the old machine used
 #   path         nginx location prefix, passed through to Kestrel intact
@@ -28,7 +28,6 @@
 applications:
 
   virtualstore:
-    version: "2026.09.12"
     description: Virtual Store — vendas
     dll: VirtualStore.Vendas.Service.Api.dll
     port: 5000
@@ -44,7 +43,6 @@ applications:
       SmtpClientData__MailPass: smtp-password
 
   monitorclientesapi:
-    version: "2026.09.12"
     description: Monitor de clientes — global directory
     dll: MonitorClientes.Monitoramento.WebApi.dll
     port: 5002
@@ -58,7 +56,6 @@ applications:
       TokenConfigurations__Key: jwt-monitorclientes
 
   dashsapi:
-    version: "2026.09.12"
     description: Dashboards
     dll: VirtualStore.Dashboards.Api.dll
     port: 5003
@@ -66,7 +63,6 @@ applications:
     tier: api
 
   relatoriosapi:
-    version: "2026.09.12"
     description: Relatórios (NFe/NFCe rendering)
     dll: VirtualStore.Relatorios.Api.dll
     port: 5004
@@ -75,7 +71,6 @@ applications:
     linked_dirs: [Relatorios, Fonts]
 
   geradorrelatoriosapi:
-    version: "2026.09.12"
     description: Gerador de relatórios
     dll: MonitorClientes.Relatorio.WebApi.dll
     port: 5005
@@ -89,7 +84,6 @@ applications:
       TokenConfigurations__Key: jwt-monitorclientes
 
   cadastrosapi:
-    version: "2026.09.12"
     description: Cadastros
     dll: VirtualStore.Cadastros.Api.dll
     port: 5006
@@ -102,7 +96,6 @@ applications:
         CepContext: cep
 
   entradaapi:
-    version: "2026.09.12"
     description: Entradas de mercadoria
     dll: VirtualStore.Entradas.API.dll
     port: 5007
@@ -115,7 +108,6 @@ applications:
         CepContext: cep
 
   pixapi:
-    version: "2026.09.12"
     description: Integração PIX
     dll: VirtualStore.Integrations.Pix.Api.dll
     port: 5008
@@ -123,12 +115,6 @@ applications:
     tier: critical
     linked_dirs: [Contents]
 
-# The three frontends in one tarball, unpacked over the document root.
-webroot_version: "2026.09.12"
-
-# nginx location -> index. spa: false is deliberate -- try_files would answer
-# every unknown path with the shell and a 200, and the error page would never
-# fire again. These builds route on the fragment, which never reaches nginx.
 static_sites:
   root:
     path: /

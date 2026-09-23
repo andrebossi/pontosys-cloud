@@ -1,7 +1,6 @@
 ---
 nginx_listen_port: 80
 nginx_status_port: 8081
-nginx_user: nginx
 
 nginx_install_from: nginx_repository
 nginx_branch: stable
@@ -10,7 +9,6 @@ nginx_worker_processes: auto
 nginx_worker_connections: 4096
 nginx_worker_rlimit_nofile: 65535
 
-nginx_static_root: /usr/share/nginx/html
 nginx_access_log: /var/log/nginx/access.json.log
 nginx_error_log: /var/log/nginx/error.log
 nginx_error_log_level: warn
@@ -45,6 +43,5 @@ app_upstream_keepalive: 16
 
 applications: {}
 static_sites: {}
-webroot_version: ""
 app_nginx_tiers: {}
 readyz_app: ""

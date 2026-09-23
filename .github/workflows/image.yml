@@ -4,16 +4,18 @@ name: golden image
 # versions in group_vars/role_app/applications.yml, and prints the image OCID
 # for the Terraform change that rolls it out.
 #
-# Runs on a self-hosted runner on the monitoring server: it is inside the VCN
-# and its instance principal is the identity Packer and Ansible use, so there
-# is no OCI key anywhere in GitHub.
+# Runs on a plain ubuntu-latest runner, SSHing straight to the monitoring
+# box's public IP (see .github/actions/run-on-monitoring) to actually run
+# Packer there -- its builder instance only gets a private IP, so the build
+# itself still has to happen from inside the VCN. No self-hosted runner and
+# no OCI key in GitHub beyond the existing CI identity.
 
 on:
   push:
     branches: [main]
     paths:
       - ansible/**
-      - packer/**
+      - resources/packer/**
   workflow_dispatch:
     inputs:
       env:
@@ -22,54 +24,39 @@ on:
         type: choice
         options: [prod, rc]
 
-env:
-  OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
-  OCI_VAULT_OCID: ${{ vars.OCI_VAULT_OCID }}
-  OCI_VAULT_KEY_OCID: ${{ vars.OCI_VAULT_KEY_OCID }}
-  OCI_SUBNET_OCID: ${{ vars.OCI_SUBNET_OCID }}
-  OCI_AVAILABILITY_DOMAIN: ${{ vars.OCI_AVAILABILITY_DOMAIN }}
-
 jobs:
   build:
-    runs-on: [self-hosted, pscloud-monitoring]
+    runs-on: ubuntu-latest
+    env:
+      OCI_CI_TENANCY_OCID: ${{ secrets.OCI_CI_TENANCY_OCID }}
+      OCI_CI_USER_OCID: ${{ secrets.OCI_CI_USER_OCID }}
+      OCI_CI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
+      OCI_CI_PRIVATE_KEY: ${{ secrets.OCI_CI_PRIVATE_KEY }}
+      OCI_CI_REGION: ${{ vars.OCI_CI_REGION }}
+      OCI_VAULT_OCID: ${{ vars.OCI_VAULT_OCID }}
+      OCI_MONITORING_IP: ${{ vars.OCI_MONITORING_IP }}
+      OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Collections
-        working-directory: ansible
-        run: ansible-galaxy install -r requirements.yml
-
-      - name: Syntax
-        working-directory: ansible
-        run: ansible-playbook image.yml --syntax-check -i localhost,
-
-      - name: Build
-        working-directory: packer
-        run: |
-          packer init .
-          packer build -machine-readable app.pkr.hcl | tee build.log
-
-      - name: Image OCID
-        working-directory: packer
-        run: |
-          id=$(jq -r '.builds[-1].artifact_id' manifest.json)
-          echo "IMAGE_OCID=$id" >> "$GITHUB_ENV"
-          {
-            echo "## Image built"
-            echo '```'
-            echo "$id"
-            echo '```'
-            echo "Roll it out by setting \`app_image_id\` in"
-            echo "\`infra/live/${{ inputs.env || 'prod' }}/app-tier/terragrunt.hcl\` and applying."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Prune images older than the five newest
-        run: |
-          keep=5
-          mapfile -t old < <(oci compute image list \
-            --compartment-id "$OCI_COMPARTMENT_OCID" \
-            --query "sort_by(data[?\"freeform-tags\".pscloud_family=='app'],&\"time-created\")|reverse(@)[$keep:].id" \
-            --raw-output | jq -r '.[]?')
-          for id in "${old[@]:-}"; do
-            [ -n "$id" ] && oci compute image delete --image-id "$id" --force
-          done
+      - name: Build, print the OCID, prune old images
+        uses: ./.github/actions/run-on-monitoring
+        with:
+          command: |
+            set -euo pipefail
+            cd ~/pscloud && git fetch --quiet && git checkout --quiet "$GITHUB_SHA"
+            cd ansible && source .venv/bin/activate
+            ansible-galaxy install -r requirements.yml
+            ansible-playbook image.yml --syntax-check -i localhost,
+            cd ../resources/packer
+            packer init .
+            packer build -machine-readable app.pkr.hcl | tee build.log
+            id=$(jq -r '.builds[-1].artifact_id' manifest.json)
+            echo "Image built: $id"
+            echo "Roll it out by setting app_image_id in infra/live/${{ inputs.env || 'prod' }}/app-tier/terragrunt.hcl and applying."
+            keep=5
+            mapfile -t old < <(oci compute image list \
+              --compartment-id "$OCI_COMPARTMENT_OCID" \
+              --query "sort_by(data[?\"freeform-tags\".pscloud_family=='app'],&\"time-created\")|reverse(@)[$keep:].id" \
+              --raw-output | jq -r '.[]?')
+            for id in "${old[@]:-}"; do
+              [ -n "$id" ] && oci compute image delete --image-id "$id" --force
+            done

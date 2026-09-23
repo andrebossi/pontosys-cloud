@@ -1,0 +1,141 @@
+name: promote
+
+# The only way canary or stable ever change. Always manual. Copies one
+# release group's version from its source file into the target channel's
+# own file, commits that, then deploys it -- never a live read off any
+# host, and canary/stable each keep their own persisted version, exactly
+# like rc does.
+#
+#   to=canary                      : versions_rc.yml -> versions_canary.yml
+#   to=stable, from=canary (default): versions_canary.yml -> versions_stable.yml
+#   to=stable, from=rc (quick path) : versions_rc.yml -> versions_stable.yml,
+#                                      skipping canary entirely
+
+on:
+  workflow_dispatch:
+    inputs:
+      to:
+        required: true
+        type: choice
+        options: [canary, stable]
+      from:
+        description: "stable only: where the version comes from. canary (default, cautious) or rc (quick path, skips canary)"
+        type: choice
+        options: [canary, rc]
+        default: canary
+      group:
+        description: a release group key, e.g. monitorclientes
+        required: true
+      apps:
+        description: 'Optional subset of the group''s apps, e.g. ["monitorclientesapi"]. Empty means all of them.'
+        default: ""
+      weight:
+        description: "Ansible rollout serial inside the target pool -- e.g. 100% or 25%. Chosen by you, no baked-in default."
+        required: true
+        default: "50%"
+      deploy:
+        description: "false = show what would be promoted without committing or deploying"
+        type: boolean
+        default: true
+
+env:
+  OCI_CI_TENANCY_OCID: ${{ secrets.OCI_CI_TENANCY_OCID }}
+  OCI_CI_USER_OCID: ${{ secrets.OCI_CI_USER_OCID }}
+  OCI_CI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
+  OCI_CI_PRIVATE_KEY: ${{ secrets.OCI_CI_PRIVATE_KEY }}
+  OCI_CI_REGION: ${{ vars.OCI_CI_REGION }}
+  OCI_VAULT_OCID: ${{ vars.OCI_VAULT_OCID }}
+  OCI_MONITORING_IP: ${{ vars.OCI_MONITORING_IP }}
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.to }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Resolve the group's version from the source file
+        id: copy
+        working-directory: ansible
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.to }}" = "canary" ]; then
+            from_env=rc
+          else
+            from_env="${{ inputs.from }}"
+          fi
+          to_env="${{ inputs.to }}"
+          from_file="group_vars/role_app/versions_${from_env}.yml"
+          to_file="group_vars/role_app/versions_${to_env}.yml"
+          from_key="release_groups_${from_env}"
+          to_key="release_groups_${to_env}"
+          group="${{ inputs.group }}"
+
+          data=$(yq -o=json ".${from_key}.\"${group}\" // {}" "$from_file")
+          if [ "$data" = "{}" ]; then
+            echo "No such group '${group}' in ${from_file}." >&2
+            exit 1
+          fi
+          if [ -n "${{ inputs.apps }}" ]; then
+            data=$(jq -c --argjson keep '${{ inputs.apps }}' \
+              'to_entries | map(select(.key as $k | $keep | index($k))) | from_entries' <<< "$data")
+          fi
+
+          # Set one app at a time, in place -- touches only these leaves,
+          # so every other group and every comment in the target file
+          # survives untouched (a whole-file JSON round-trip would drop
+          # both).
+          while IFS=$'\t' read -r app version; do
+            yq -i ".${to_key}.\"${group}\".\"${app}\" = \"${version}\" |
+                   .${to_key}.\"${group}\".\"${app}\" style=\"double\"" "$to_file"
+          done < <(jq -r 'to_entries[] | [.key, .value] | @tsv' <<< "$data")
+
+          echo "Promoting $group from $from_env to $to_env: $data"
+          echo "to_file=$to_file" >> "$GITHUB_OUTPUT"
+          echo "apps_json=$(jq -c 'keys' <<< "$data")" >> "$GITHUB_OUTPUT"
+
+      - name: Commit
+        if: inputs.deploy
+        id: commit
+        run: |
+          set -euo pipefail
+          git config user.name "pscloud-bot"
+          git config user.email "bot@pontosys.com"
+          git add "ansible/${{ steps.copy.outputs.to_file }}"
+          if git diff --cached --quiet; then
+            echo "Already at that version in ansible/${{ steps.copy.outputs.to_file }} -- nothing to commit."
+          else
+            git commit -m "promote: ${{ inputs.group }} -> ${{ inputs.to }}"
+            git push origin HEAD:main
+          fi
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Guard
+        if: inputs.deploy && inputs.to == 'canary'
+        uses: ./.github/actions/run-on-monitoring
+        with:
+          command: |
+            set -euo pipefail
+            cd ~/pscloud && git fetch --quiet && git checkout --quiet "${{ steps.commit.outputs.sha }}"
+            cd ansible && source .venv/bin/activate
+            if [ -z "$(ansible-inventory -i inventories/production --graph pool_canary | tail -n +2)" ]; then
+              echo "pool_canary has no hosts -- run canary.yml action=up first." >&2
+              exit 1
+            fi
+
+      - name: Deploy
+        if: inputs.deploy
+        uses: ./.github/actions/run-on-monitoring
+        with:
+          command: |
+            set -euo pipefail
+            limit=${{ inputs.to == 'canary' && 'pool_canary' || 'pool_stable' }}
+            cd ~/pscloud && git fetch --quiet && git checkout --quiet "${{ steps.commit.outputs.sha }}"
+            cd ansible && source .venv/bin/activate
+            ansible-playbook -i inventories/production deploy.yml -l "$limit" \
+              -e "deploy_serial=${{ inputs.weight }}" \
+              -e 'deploy_apps=${{ steps.copy.outputs.apps_json }}'

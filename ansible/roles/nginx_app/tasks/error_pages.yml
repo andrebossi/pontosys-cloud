@@ -1,0 +1,16 @@
+---
+- name: Error pages
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ nginx_static_root }}/{{ item }}"
+    owner: "{{ nginx_user }}"
+    group: "{{ nginx_user }}"
+    mode: "0644"
+  loop: [404.html, 50x.html, nginx-logo.png]
+
+- name: poweredby.png
+  ansible.builtin.file:
+    path: "{{ nginx_static_root }}/poweredby.png"
+    src: "{{ nginx_static_root }}/nginx-logo.png"
+    state: link
+    force: true

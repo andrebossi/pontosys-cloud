@@ -10,7 +10,7 @@ infra/bootstrap    state bucket, applied once with local state
 infra/modules      generic Terraform modules, no environment values inside
 infra/live         Terragrunt: one directory per environment, one state per unit
 ansible            configuration, dynamic inventory from the pscloud.role tag
-packer             application image
+resources/packer   application image
 keys               credentials and .env, never committed
 ```
 
@@ -118,7 +118,7 @@ terraform fmt -recursive infra/modules
 Rebuilding the application image:
 
 ```sh
-cd packer
+cd resources/packer
 packer build -var compartment_ocid=$OCI_COMPARTMENT_OCID app.pkr.hcl
 export PSCLOUD_APP_IMAGE_ID=ocid1.image.oc1...    # read by the app-tier unit
 ```

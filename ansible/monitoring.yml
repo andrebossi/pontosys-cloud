@@ -16,7 +16,7 @@
         fail2ban_maxretry: 5
         fail2ban_loglevel: INFO
         fail2ban_jail_configuration:
-          - { section: sshd, option: enabled, value: "false" }
+          - { section: sshd, option: enabled, value: "true" }
           - { section: grafana, option: enabled, value: "true" }
           - { section: grafana, option: port, value: "http,https" }
           - { section: grafana, option: filter, value: "grafana-local" }

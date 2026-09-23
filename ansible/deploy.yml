@@ -1,12 +1,4 @@
 ---
-# Install the application versions from group_vars/role_app/applications.yml.
-#
-#   ansible-playbook deploy.yml -l env_rc                    # canary VMs first
-#   ansible-playbook deploy.yml -l env_prod -e deploy_serial=25%
-#   ansible-playbook deploy.yml -l env_rc -e "deploy_apps=['pixapi']"
-#
-# Rolling back is checking out the previous commit of applications.yml and
-# running it again -- git is the record of what each environment ran.
 - name: Deploy
   hosts: role_app
   become: true

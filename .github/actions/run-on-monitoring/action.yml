@@ -1,0 +1,68 @@
+name: Run on the monitoring box
+description: >
+  Runs a command on the monitoring host over SSH, straight to its public
+  IP -- no bastion, no self-hosted runner. The SSH key itself still comes
+  from Vault, fetched using the existing CI OCI API key; nothing new gets
+  installed on this box for CI's sake.
+#
+# Reads its OCI/Vault identity and the box's address from the CALLING JOB's
+# `env:` (not `inputs:` -- every workflow that uses this action sets the
+# same block, see any of rollout.yml/canary.yml/promote.yml/image.yml):
+#
+#   OCI_CI_TENANCY_OCID, OCI_CI_USER_OCID, OCI_CI_FINGERPRINT,
+#   OCI_CI_PRIVATE_KEY, OCI_CI_REGION     -- the existing CI OCI API key
+#   OCI_VAULT_OCID                       -- to fetch pscloud-ssh-monitoring
+#   OCI_MONITORING_IP                    -- the box's public IP
+
+inputs:
+  command:
+    description: Shell command to run on the monitoring box, as the ubuntu user.
+    required: true
+
+outputs:
+  output:
+    description: Everything the command printed on stdout.
+    value: ${{ steps.run.outputs.output }}
+
+runs:
+  using: composite
+  steps:
+    - name: OCI CLI setup
+      shell: bash
+      run: |
+        mkdir -p ~/.oci
+        printf '%s\n' "$OCI_CI_PRIVATE_KEY" > ~/.oci/ci_key.pem
+        chmod 600 ~/.oci/ci_key.pem
+        cat > ~/.oci/config <<EOF
+        [DEFAULT]
+        user=$OCI_CI_USER_OCID
+        fingerprint=$OCI_CI_FINGERPRINT
+        tenancy=$OCI_CI_TENANCY_OCID
+        region=$OCI_CI_REGION
+        key_file=~/.oci/ci_key.pem
+        EOF
+        chmod 600 ~/.oci/config
+
+    - name: Fetch the monitoring host's SSH key from Vault
+      shell: bash
+      run: |
+        oci secrets secret-bundle get-secret-bundle-by-name \
+          --secret-name pscloud-ssh-monitoring --vault-id "$OCI_VAULT_OCID" \
+          --query 'data."secret-bundle-content".content' --raw-output \
+          | base64 -d > ~/.ssh/pscloud-monitoring
+        chmod 600 ~/.ssh/pscloud-monitoring
+
+    - name: Run it
+      id: run
+      shell: bash
+      env:
+        INPUT_COMMAND: ${{ inputs.command }}
+      run: |
+        ssh -o StrictHostKeyChecking=accept-new \
+          -i ~/.ssh/pscloud-monitoring ubuntu@"$OCI_MONITORING_IP" \
+          "$INPUT_COMMAND" | tee /tmp/run-on-monitoring.out
+        {
+          echo "output<<PSCLOUD_EOF"
+          cat /tmp/run-on-monitoring.out
+          echo "PSCLOUD_EOF"
+        } >> "$GITHUB_OUTPUT"
