@@ -82,9 +82,6 @@ locals {
       "to read secret-bundles in compartment id ${local.c}",
     ]
 
-    # The Ansible executor generates database passwords and writes them to the
-    # vault. `use keys` and `use vaults` are what let it encrypt a new secret;
-    # without them `manage secret-family` creates nothing.
     manage_secrets = [
       "to manage secret-family in compartment id ${local.c}",
       "to read secret-bundles in compartment id ${local.c}",
@@ -104,6 +101,11 @@ locals {
     artifacts_bucket = [
       "to manage objects in compartment id ${local.c} where target.bucket.name = '${var.artifacts_bucket_name}'",
       "to read buckets in compartment id ${local.c}",
+    ]
+
+    manage_compute = [
+      "to manage instance-family in compartment id ${local.c}",
+      "to manage load-balancers in compartment id ${local.c}",
     ]
   }
 

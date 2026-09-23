@@ -147,9 +147,11 @@ resource "oci_load_balancer_listener" "grafana" {
   }
 }
 
-resource "oci_core_instance_configuration" "baseline" {
+resource "oci_core_instance_configuration" "app" {
+  for_each = local.pools
+
   compartment_id = var.compartment_id
-  display_name   = "${var.label_prefix}-ic-app-baseline"
+  display_name   = "${var.label_prefix}-ic-app-${each.key}"
   freeform_tags  = var.freeform_tags
 
   instance_details {
@@ -196,7 +198,8 @@ resource "oci_core_instance_configuration" "baseline" {
         }
       }
 
-      defined_tags = var.defined_tags
+      freeform_tags = merge(var.freeform_tags, { pscloud_pool = each.key })
+      defined_tags  = var.defined_tags
     }
   }
 
@@ -209,7 +212,7 @@ resource "oci_core_instance_pool" "app" {
   for_each = local.pools
 
   compartment_id            = var.compartment_id
-  instance_configuration_id = oci_core_instance_configuration.baseline.id
+  instance_configuration_id = oci_core_instance_configuration.app[each.key].id
   display_name              = "${var.label_prefix}-pool-${each.key}"
   size                      = each.key == "stable" ? var.pool_min_size : 0
 

@@ -1,7 +1,9 @@
 output "load_balancer_id" { value = oci_load_balancer_load_balancer.this.id }
 output "load_balancer_ip" { value = oci_load_balancer_load_balancer.this.ip_address_details[0].ip_address }
 output "backend_set_name" { value = oci_load_balancer_backend_set.app.name }
-output "baseline_instance_configuration_id" { value = oci_core_instance_configuration.baseline.id }
+output "instance_configuration_ids" {
+  value = { for k, v in oci_core_instance_configuration.app : k => v.id }
+}
 
 output "instance_pool_ids" {
   value = { for k, v in oci_core_instance_pool.app : k => v.id }

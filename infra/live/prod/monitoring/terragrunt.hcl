@@ -14,7 +14,7 @@ dependency "network" {
   config_path = "../network"
 
   mock_outputs = {
-    subnet_ids = { app = "ocid1.subnet.oc1..mock" }
+    subnet_ids = { public = "ocid1.subnet.oc1..mock" }
     nsg_ids    = { monitoring = "ocid1.networksecuritygroup.oc1..mock" }
   }
   mock_outputs_allowed_terraform_commands = ["init", "validate", "plan"]
@@ -43,7 +43,7 @@ inputs = {
   name = "${local.env.prefix}-monitoring"
 
   instances = {
-    "01" = {}
+    "01" = { data_volume_size_in_gbs = 80, assign_public_ip = true }
   }
 
   shape         = "VM.Standard.A1.Flex"
@@ -52,7 +52,7 @@ inputs = {
 
   image_id = null
 
-  subnet_id = dependency.network.outputs.subnet_ids.app
+  subnet_id = dependency.network.outputs.subnet_ids.public
   nsg_ids   = [dependency.network.outputs.nsg_ids.monitoring]
 
   ssh_public_key = dependency.platform.outputs.ssh_public_keys.monitoring

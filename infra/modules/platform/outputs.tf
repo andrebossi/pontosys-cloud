@@ -11,6 +11,11 @@ output "ssh_private_key_secret_ids" {
   value       = { for k, v in oci_vault_secret.ssh_private_key : k => v.id }
 }
 
+output "ssh_public_key_secret_ids" {
+  description = "Public key mirrored into the vault alongside the private key, for access/audit tooling that only needs the public half."
+  value       = { for k, v in oci_vault_secret.ssh_public_key : k => v.id }
+}
+
 output "ssh_private_keys" {
   value     = { for k, v in tls_private_key.ssh : k => v.private_key_openssh }
   sensitive = true

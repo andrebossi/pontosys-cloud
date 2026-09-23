@@ -47,19 +47,19 @@ inputs = {
   nsgs = ["lb", "app", "db", "monitoring"]
 
   nsg_rules = {
-    lb-in-web         = { nsg = "lb", remotes = local.env.lb_ingress_cidrs, ports = [80, 443] }
-    lb-in-grafana     = { nsg = "lb", remotes = local.env.lb_ingress_cidrs, ports = [local.env.grafana_port] }
-    lb-out-app        = { nsg = "lb", direction = "EGRESS", remotes = ["app"], ports = [local.env.app_port] }
-    lb-out-monitoring = { nsg = "lb", direction = "EGRESS", remotes = ["monitoring"], ports = [local.env.grafana_port] }
-    app-in-lb         = { nsg = "app", remotes = ["lb"], ports = [local.env.app_port] }
-    app-in-ssh        = { nsg = "app", remotes = [local.env.subnet_cidrs.app], ports = [22] }
-    app-out-db        = { nsg = "app", direction = "EGRESS", remotes = ["db"], ports = [local.env.db_port] }
-    app-out-any       = { nsg = "app", direction = "EGRESS", protocol = "all", remotes = ["0.0.0.0/0"] }
-    db-in-app         = { nsg = "db", remotes = ["app"], ports = [local.env.db_port] }
-    db-in-client      = { nsg = "db", remotes = local.env.db_client_cidrs, ports = [local.env.db_port] }
+    lb-in-web    = { nsg = "lb", remotes = local.env.lb_ingress_cidrs, ports = [80, 443] }
+    lb-out-app   = { nsg = "lb", direction = "EGRESS", remotes = ["app"], ports = [local.env.app_port] }
 
-    monitoring-in-lb      = { nsg = "monitoring", remotes = ["lb"], ports = [local.env.grafana_port] }
-    monitoring-in-bastion = { nsg = "monitoring", remotes = [local.env.subnet_cidrs.app], ports = [22] }
+    app-in-lb    = { nsg = "app", remotes = ["lb"], ports = [local.env.app_port] }
+    app-in-ssh   = { nsg = "app", remotes = ["monitoring"], ports = [22] }
+    app-out-db   = { nsg = "app", direction = "EGRESS", remotes = ["db"], ports = [local.env.db_port] }
+    app-out-any  = { nsg = "app", direction = "EGRESS", protocol = "all", remotes = ["0.0.0.0/0"] }
+
+    db-in-app    = { nsg = "db", remotes = ["app"], ports = [local.env.db_port] }
+    db-in-client = { nsg = "db", remotes = local.env.db_client_cidrs, ports = [local.env.db_port] }
+
+    monitoring-in-ssh     = { nsg = "monitoring", remotes = ["0.0.0.0/0"], ports = [22] }
+    monitoring-in-grafana = { nsg = "monitoring", remotes = ["0.0.0.0/0"], ports = [local.env.grafana_port] }
     monitoring-out-any    = { nsg = "monitoring", direction = "EGRESS", protocol = "all", remotes = ["0.0.0.0/0"] }
   }
 

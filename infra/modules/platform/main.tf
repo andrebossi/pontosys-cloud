@@ -32,12 +32,29 @@ resource "oci_vault_secret" "ssh_private_key" {
   compartment_id = var.compartment_id
   vault_id       = oci_kms_vault.this.id
   key_id         = oci_kms_key.this.id
-  secret_name    = "${var.label_prefix}-ssh-${each.key}"
+  secret_name    = "${var.label_prefix}-ssh-${each.key}-priv"
   description    = "Private SSH key for role ${each.key}"
 
   secret_content {
     content_type = "BASE64"
     content      = base64encode(each.value.private_key_openssh)
+  }
+
+  freeform_tags = var.freeform_tags
+}
+
+resource "oci_vault_secret" "ssh_public_key" {
+  for_each = tls_private_key.ssh
+
+  compartment_id = var.compartment_id
+  vault_id       = oci_kms_vault.this.id
+  key_id         = oci_kms_key.this.id
+  secret_name    = "${var.label_prefix}-ssh-${each.key}-pub"
+  description    = "Public SSH key for role ${each.key}"
+
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(each.value.public_key_openssh)
   }
 
   freeform_tags = var.freeform_tags
