@@ -17,8 +17,8 @@ inputs = {
   artifacts_bucket_name = "${local.env.prefix}-releases"
 
   roles = {
-    app        = { capabilities = ["read_secrets"] }
-    monitoring = { capabilities = ["read_secrets", "read_inventory", "read_metrics", "artifacts_bucket", "manage_compute"] }
+    app        = { capabilities = ["manage_secrets"] }
+    monitoring = { capabilities = ["manage_secrets", "read_inventory", "read_metrics", "artifacts_bucket", "manage_compute"] }
   }
 
   freeform_tags = { CostCenter = local.env.tags.CostCenter }
