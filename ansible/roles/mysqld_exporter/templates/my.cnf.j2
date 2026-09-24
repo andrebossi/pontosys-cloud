@@ -1,0 +1,6 @@
+# {{ ansible_managed }}
+[client]
+user={{ mysqld_exporter_dsn.username }}
+password={{ mysqld_exporter_dsn.password }}
+host={{ mysqld_exporter_dsn.host }}
+port={{ mysqld_exporter_dsn.port }}

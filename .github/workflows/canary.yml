@@ -5,6 +5,13 @@ name: canary
 # (compute + load-balancer management), reachable over HTTPS from a plain
 # ubuntu-latest runner with the existing CI OCI API key -- no bastion/SSH
 # needed for anything in this workflow.
+#
+# up/down/snapshot go through oracle-actions/run-oci-cli-command -- one OCI
+# call each (or two chained by output, for snapshot), nothing to gain from
+# scripting them by hand. traffic is the exception: several oci calls
+# threaded together with jq/bash (matching backend names to canary IPs,
+# weighting what's left), which reads better as one script than as half a
+# dozen chained steps -- it keeps the manual OCI CLI config setup.
 
 on:
   workflow_dispatch:
@@ -23,6 +30,13 @@ env:
   OCI_CI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
   OCI_CI_PRIVATE_KEY: ${{ secrets.OCI_CI_PRIVATE_KEY }}
   OCI_CI_REGION: ${{ vars.OCI_CI_REGION }}
+  # Same values, under the names oracle-actions/run-oci-cli-command expects --
+  # used by the up/down/snapshot steps only.
+  OCI_CLI_TENANCY: ${{ secrets.OCI_CI_TENANCY_OCID }}
+  OCI_CLI_USER: ${{ secrets.OCI_CI_USER_OCID }}
+  OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
+  OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CI_PRIVATE_KEY }}
+  OCI_CLI_REGION: ${{ vars.OCI_CI_REGION }}
   OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
   OCI_CANARY_POOL_ID: ${{ vars.OCI_CANARY_POOL_ID }}
   OCI_STABLE_POOL_ID: ${{ vars.OCI_STABLE_POOL_ID }}
@@ -33,7 +47,30 @@ jobs:
   canary:
     runs-on: ubuntu-latest
     steps:
-      - name: OCI CLI setup
+      - name: up -- scale pool_canary to 1
+        if: inputs.action == 'up'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: >-
+            compute-management instance-pool update
+            --instance-pool-id ${{ env.OCI_CANARY_POOL_ID }} --size 1
+            --wait-for-state RUNNING --force
+
+      - name: up -- note
+        if: inputs.action == 'up'
+        run: echo "pool_canary is up. It carries 0% of real traffic until you run this workflow again with action=traffic."
+
+      - name: down -- scale pool_canary to 0
+        if: inputs.action == 'down'
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: >-
+            compute-management instance-pool update
+            --instance-pool-id ${{ env.OCI_CANARY_POOL_ID }} --size 0
+            --wait-for-state RUNNING --force
+
+      - name: traffic -- OCI CLI setup
+        if: inputs.action == 'traffic'
         run: |
           mkdir -p ~/.oci
           printf '%s\n' "$OCI_CI_PRIVATE_KEY" > ~/.oci/ci_key.pem
@@ -47,21 +84,6 @@ jobs:
           key_file=~/.oci/ci_key.pem
           EOF
           chmod 600 ~/.oci/config
-
-      - name: up -- scale pool_canary to 1
-        if: inputs.action == 'up'
-        run: |
-          oci compute-management instance-pool update \
-            --instance-pool-id "$OCI_CANARY_POOL_ID" --size 1 \
-            --wait-for-state RUNNING --force
-          echo "pool_canary is up. It carries 0% of real traffic until you run this workflow again with action=traffic."
-
-      - name: down -- scale pool_canary to 0
-        if: inputs.action == 'down'
-        run: |
-          oci compute-management instance-pool update \
-            --instance-pool-id "$OCI_CANARY_POOL_ID" --size 0 \
-            --wait-for-state RUNNING --force
 
       - name: traffic -- set the load balancer's canary weight
         if: inputs.action == 'traffic'
@@ -110,21 +132,41 @@ jobs:
               --backend-name "$b" --weight "$w" --wait-for-state SUCCEEDED
           done
 
-      - name: snapshot -- image the validated canary
+      - name: snapshot -- find the canary instance
+        if: inputs.action == 'snapshot'
+        id: instance
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: >-
+            compute-management instance-pool list-instances
+            --compartment-id ${{ env.OCI_COMPARTMENT_OCID }} --instance-pool-id ${{ env.OCI_CANARY_POOL_ID }}
+          query: "data[0].id"
+
+      - name: snapshot -- check there is one
         if: inputs.action == 'snapshot'
         run: |
-          set -euo pipefail
-          instance_id=$(oci compute-management instance-pool list-instances \
-            --compartment-id "$OCI_COMPARTMENT_OCID" --instance-pool-id "$OCI_CANARY_POOL_ID" \
-            --query 'data[0].id' --raw-output)
-          [ "$instance_id" != "null" ] || { echo "pool_canary has no instance -- run action=up first." >&2; exit 1; }
-          release=$(date +%Y%m%d%H%M%S)
-          image_id=$(oci compute instance create-image --instance-id "$instance_id" \
-            --display-name "pscloud-app-canary-$release" \
-            --freeform-tags "{\"pscloud_family\":\"app\",\"pscloud_built_by\":\"canary-snapshot\",\"pscloud_release\":\"$release\"}" \
-            --wait-for-state AVAILABLE --query 'data.id' --raw-output)
+          if [ "${{ steps.instance.outputs.raw_output }}" = "null" ]; then
+            echo "pool_canary has no instance -- run action=up first." >&2
+            exit 1
+          fi
+
+      - name: snapshot -- image it
+        if: inputs.action == 'snapshot'
+        id: image
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: >-
+            compute instance create-image --instance-id ${{ steps.instance.outputs.raw_output }}
+            --display-name pscloud-app-canary-${{ github.run_id }}
+            --freeform-tags {"pscloud_family":"app","pscloud_built_by":"canary-snapshot","pscloud_release":"${{ github.run_id }}"}
+            --wait-for-state AVAILABLE
+          query: data.id
+
+      - name: snapshot -- summary
+        if: inputs.action == 'snapshot'
+        run: |
           {
             echo "## Canary snapshot"
-            echo "\`$image_id\`"
+            echo "\`${{ steps.image.outputs.raw_output }}\`"
             echo "Set \`app_image_id\` in \`infra/live/prod/app-tier/terragrunt.hcl\` and apply if you want it."
           } >> "$GITHUB_STEP_SUMMARY"

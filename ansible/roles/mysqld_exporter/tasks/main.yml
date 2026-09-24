@@ -1,0 +1,80 @@
+---
+# Default collector set only (global_status, global_variables, among a few
+# others) -- no --collect.info_schema.*/perf_schema.* flags. That's on
+# purpose: key metrics for things that could actually take the database
+# down (mysql_up, connections near the limit, aborted connections), not the
+# full exporter dashboard. See alerts/monitoring/rules.yml.
+
+- name: Service account
+  ansible.builtin.user:
+    name: "{{ mysqld_exporter_user }}"
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+
+- name: Config directory
+  ansible.builtin.file:
+    path: "{{ mysqld_exporter_config_dir }}"
+    state: directory
+    owner: "{{ mysqld_exporter_user }}"
+    group: "{{ mysqld_exporter_user }}"
+    mode: "0750"
+
+- name: Install the binary
+  ansible.builtin.unarchive:
+    src: "{{ mysqld_exporter_url }}"
+    dest: /usr/local/bin
+    remote_src: true
+    extra_opts: ["--strip-components=1"]
+    include: ["mysqld_exporter-{{ mysqld_exporter_version }}.{{ mysqld_exporter_arch }}/mysqld_exporter"]
+    creates: "{{ mysqld_exporter_bin }}"
+    mode: "0755"
+
+# db_users/tasks/exporter.yml is what creates this -- ansible/database.yml,
+# run from a role_app host (already has network access to the DB). Same
+# generate-on-first-use, store-immediately, read-back-ever-after vault
+# pattern as everywhere else in this repo; this role only ever reads it.
+- name: Exporter credential
+  oracle.oci.oci_secrets_secret_bundle_facts:
+    secret_name: "{{ secret_prefix }}-mysql-exporter"
+    vault_id: "{{ oci_vault_id }}"
+    stage: CURRENT
+    auth_type: "{{ oci_auth_type }}"
+  delegate_to: localhost
+  become: false
+  register: exporter_bundle
+  changed_when: false
+  no_log: true
+
+- name: Connection
+  ansible.builtin.set_fact:
+    mysqld_exporter_dsn: >-
+      {{ exporter_bundle.secret_bundle.secret_bundle_content.content
+         | b64decode | from_json }}
+  no_log: true
+
+- name: my.cnf
+  ansible.builtin.template:
+    src: my.cnf.j2
+    dest: "{{ mysqld_exporter_config_dir }}/.my.cnf"
+    owner: "{{ mysqld_exporter_user }}"
+    group: "{{ mysqld_exporter_user }}"
+    mode: "0600"
+  no_log: true
+  notify: restart mysqld_exporter
+
+- name: Unit
+  ansible.builtin.template:
+    src: mysqld_exporter.service.j2
+    dest: /etc/systemd/system/mysqld_exporter.service
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart mysqld_exporter
+
+- name: Running
+  ansible.builtin.systemd:
+    name: mysqld_exporter
+    enabled: true
+    state: started
+    daemon_reload: true

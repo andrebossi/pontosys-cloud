@@ -43,3 +43,10 @@ db_schema_collation: utf8mb4_unicode_ci
 db_rotate: false
 
 db_remove_unknown_users: false
+
+# mysqld_exporter's account -- not an application, doesn't come from
+# applications.yml. Runs on the monitoring box (subnet "public"), not
+# alongside MySQL itself (OCI-managed, no OS access there).
+db_create_exporter_user: true
+db_exporter_host_acl: "10.20.0.%"
+db_exporter_max_connections: 3

@@ -35,37 +35,6 @@ base_users:
       - /usr/bin/systemd-analyze *
     ssh_keys: []
 
-base_sysctl:
-  # A .NET process reserves far more virtual address space than it touches.
-  # Strict accounting (0) refuses those reservations and the runtime aborts.
-  vm.overcommit_memory: "1"
-  # Swap is the OOM backstop, not a tier to run from. The default 60 pages out
-  # idle Kestrel heaps and the first request after a quiet spell pays for it.
-  vm.swappiness: "{{ swap_swappiness }}"
-  # Every runtime maps hundreds of assemblies. The default 65530 is reached
-  # long before memory is, and the failure reads as a bad_alloc.
-  vm.max_map_count: "262144"
-
-  # The accept queue nginx drains. The default is 4096 on this kernel already;
-  # pinned so a future default does not move it quietly.
-  net.core.somaxconn: "4096"
-  net.ipv4.tcp_max_syn_backlog: "4096"
-  # Outbound sockets: nginx to Kestrel, and the apps to MySQL.
-  net.ipv4.ip_local_port_range: "10240 65535"
-  # Client-side only since 4.12, and this box is the client on every
-  # connection it opens.
-  net.ipv4.tcp_tw_reuse: "1"
-  # Keepalive upstreams idle between bursts. Without this the kernel resets
-  # the congestion window on every gap and the next request pays for it.
-  net.ipv4.tcp_slow_start_after_idle: "0"
-
-  fs.file-max: "200000"
-  fs.inotify.max_user_instances: "512"
-
-swap_size_mb: 2048
-swap_file: /swapfile
-swap_swappiness: 10
-
 journald_settings:
   Storage: persistent
   Compress: "yes"

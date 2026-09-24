@@ -89,12 +89,16 @@
         owner: "{{ app_deploy_user }}"
         group: "{{ app_deploy_user }}"
 
+    - name: "{{ app_name }} — enable on boot"
+      ansible.builtin.systemd:
+        name: "dotnet-app@{{ app_name }}.service"
+        enabled: true
+        daemon_reload: true
+
     - name: "{{ app_name }} — restart"
       ansible.builtin.systemd:
         name: "dotnet-app@{{ app_name }}.service"
         state: restarted
-        enabled: true
-        daemon_reload: true
       when: not app_bake | bool
 
     - name: "{{ app_name }} — answers on 127.0.0.1:{{ app.port }}"

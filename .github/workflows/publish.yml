@@ -4,23 +4,22 @@ name: publish artifact
 # Ionic/Flutter build -- this just tars a directory and uploads it, so a
 # frontend repo calls it exactly like a .NET repo does).
 #
-# Uploads one tarball to the bucket, then dispatches an rc.yml run in this
-# repo, which records the new version in versions_rc.yml and deploys it to
-# rc in the same run.
+# Uploads one tarball to the bucket. Doesn't touch versions_rc.yml or deploy
+# anything -- chain a call to rc.yml right after this one (needs:) in the
+# caller's own workflow to actually land the version in rc.
 #
 # Called from another repository, after a job in that same workflow has
 # uploaded the build output as a run artifact (actions/upload-artifact):
 #   publish:
 #     needs: build
-#     uses: pontosys/pscloud/.github/workflows/publish.yml@main
-#     with: { name: pixapi, group: pixapi, version: 2026.09.12, artifact: pixapi-build }
+#     uses: andrebossi/pontosys-cloud/.github/workflows/publish.yml@main
+#     with: { name: pixapi, version: 2026.09.12, artifact: pixapi-build }
 #     secrets: inherit
 #
 # The caller needs these org-level secrets/vars available to it (secrets:
 # inherit, or org-level vars): OCI_CI_TENANCY_OCID, OCI_CI_USER_OCID,
 # OCI_CI_FINGERPRINT, OCI_CI_PRIVATE_KEY, OCI_CI_REGION (the existing CI OCI
-# API key), OCI_ARTIFACT_BUCKET, and PSCLOUD_DISPATCH_TOKEN (a PAT with
-# write access to this repo -- GITHUB_TOKEN can't dispatch across repos).
+# API key) and OCI_ARTIFACT_BUCKET.
 
 on:
   workflow_call:
@@ -29,10 +28,6 @@ on:
         required: true
         type: string
         description: artifact key, e.g. pixapi -- also the release_groups_rc[group] key
-      group:
-        required: true
-        type: string
-        description: which release_groups_rc group this artifact belongs to
       version:
         required: true
         type: string
@@ -50,11 +45,11 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     env:
-      OCI_CI_TENANCY_OCID: ${{ secrets.OCI_CI_TENANCY_OCID }}
-      OCI_CI_USER_OCID: ${{ secrets.OCI_CI_USER_OCID }}
-      OCI_CI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
-      OCI_CI_PRIVATE_KEY: ${{ secrets.OCI_CI_PRIVATE_KEY }}
-      OCI_CI_REGION: ${{ vars.OCI_CI_REGION }}
+      OCI_CLI_TENANCY: ${{ secrets.OCI_CI_TENANCY_OCID }}
+      OCI_CLI_USER: ${{ secrets.OCI_CI_USER_OCID }}
+      OCI_CLI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
+      OCI_CLI_KEY_CONTENT: ${{ secrets.OCI_CI_PRIVATE_KEY }}
+      OCI_CLI_REGION: ${{ vars.OCI_CI_REGION }}
       OCI_ARTIFACT_BUCKET: ${{ vars.OCI_ARTIFACT_BUCKET }}
     steps:
       - name: Download the build output
@@ -66,40 +61,21 @@ jobs:
       - name: Pack
         run: tar -C /tmp/publish-input -czf /tmp/artifact.tar.gz .
 
-      - name: OCI CLI setup
-        run: |
-          mkdir -p ~/.oci
-          printf '%s\n' "$OCI_CI_PRIVATE_KEY" > ~/.oci/ci_key.pem
-          chmod 600 ~/.oci/ci_key.pem
-          cat > ~/.oci/config <<EOF
-          [DEFAULT]
-          user=$OCI_CI_USER_OCID
-          fingerprint=$OCI_CI_FINGERPRINT
-          tenancy=$OCI_CI_TENANCY_OCID
-          region=$OCI_CI_REGION
-          key_file=~/.oci/ci_key.pem
-          EOF
-          chmod 600 ~/.oci/config
+      - name: Object storage namespace
+        id: ns
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: os ns get
+          query: data
 
       - name: Upload
-        run: |
-          ns=$(oci os ns get --query data --raw-output)
-          oci os object put --namespace "$ns" --bucket-name "$OCI_ARTIFACT_BUCKET" \
-            --name "artifacts/${{ inputs.name }}/${{ inputs.name }}-${{ inputs.version }}.tar.gz" \
+        uses: oracle-actions/run-oci-cli-command@v1.3.2
+        with:
+          command: >-
+            os object put --namespace ${{ steps.ns.outputs.raw_output }}
+            --bucket-name ${{ env.OCI_ARTIFACT_BUCKET }}
+            --name artifacts/${{ inputs.name }}/${{ inputs.name }}-${{ inputs.version }}.tar.gz
             --file /tmp/artifact.tar.gz --force
 
-      - name: Bump it into versions_rc.yml
-        env:
-          GH_TOKEN: ${{ secrets.PSCLOUD_DISPATCH_TOKEN }}
-        run: |
-          gh api repos/pontosys/pscloud/dispatches -f event_type=bump-rc \
-            -f "client_payload[group]=${{ inputs.group }}" \
-            -f "client_payload[app]=${{ inputs.name }}" \
-            -f "client_payload[version]=${{ inputs.version }}"
-
-      - name: Next step
-        run: |
-          {
-            echo "Uploaded \`${{ inputs.name }} ${{ inputs.version }}\`."
-            echo "rc.yml will record it in \`versions_rc.yml\` and deploy it to rc."
-          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Summary
+        run: echo "Uploaded \`${{ inputs.name }} ${{ inputs.version }}\`." >> "$GITHUB_STEP_SUMMARY"

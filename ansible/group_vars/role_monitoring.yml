@@ -1,4 +1,12 @@
 ---
+base_sysctl:
+  # VictoriaMetrics/VictoriaLogs mmap their storage files heavily; the
+  # default 65530 is reached long before memory is.
+  vm.max_map_count: "262144"
+
+  fs.file-max: "200000"
+  fs.inotify.max_user_instances: "512"
+
 observability_dir: /opt/observability
 grafana_log_dir: /var/log/grafana
 grafana_log_max_days: 7
@@ -35,7 +43,7 @@ fluentbit_backend_inputs:
     processors: &backend_selector
       metrics:
         - name: metrics_selector
-          metric_name: /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
+          metric_name: /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|mysql_up|mysql_global_status_.*|mysql_global_variables_max_connections|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
           action: include
 
   - name: prometheus_scrape
@@ -53,6 +61,45 @@ fluentbit_backend_inputs:
     metrics_path: /metrics
     scrape_interval: 60s
     processors: *backend_selector
+
+  # mysqld_exporter (role mysqld_exporter) -- default collector set, so this
+  # allowlist is the actual scope limiter: only the metrics the alerts in
+  # alerts/monitoring/rules.yml use, not the full exporter surface.
+  - name: prometheus_scrape
+    tag: backend_metrics
+    host: 127.0.0.1
+    port: 9104
+    metrics_path: /metrics
+    scrape_interval: 60s
+    processors: *backend_selector
+
+  - name: systemd
+    tag: monitoring.log
+    systemd_filter:
+      - _SYSTEMD_UNIT=docker.service
+    strip_underscores: true
+    read_from_tail: true
+    max_entries: 1000
+    db: /var/lib/fluent-bit/systemd-docker.db
+    storage.type: filesystem
+    threaded: "on"
+
+fluentbit_backend_filters:
+  - name: modify
+    match: monitoring.log
+    add: job monitoring
+
+fluentbit_backend_outputs:
+  - name: http
+    match: monitoring.log
+    host: "{{ monitoring_endpoints.logs.host }}"
+    port: "{{ monitoring_endpoints.logs.port }}"
+    uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,CONTAINER_NAME"
+    format: json_lines
+    json_date_format: iso8601
+    compress: gzip
+    retry_limit: 5
+    storage.total_limit_size: 256M
 
 monitoring_host: 127.0.0.1
 

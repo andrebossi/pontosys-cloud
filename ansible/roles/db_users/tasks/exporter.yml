@@ -1,0 +1,73 @@
+---
+# Same generate-on-first-use, store-immediately, read-back-ever-after shape as
+# credential.yml -- just for one fixed account instead of one per app, and not
+# tied to any applications.yml entry (the exporter isn't an application).
+
+- name: "exporter — read"
+  oracle.oci.oci_secrets_secret_bundle_facts:
+    secret_name: "{{ secret_prefix }}-mysql-exporter"
+    vault_id: "{{ oci_vault_id }}"
+    stage: CURRENT
+    auth_type: "{{ oci_auth_type }}"
+  delegate_to: localhost
+  become: false
+  register: exporter_bundle
+  ignore_errors: true
+  changed_when: false
+  no_log: true
+
+- name: "exporter — generate"
+  when: exporter_bundle is failed
+  no_log: true
+  block:
+    - ansible.builtin.set_fact:
+        exporter_dsn:
+          host: "{{ db_admin.host }}"
+          port: "{{ db_admin.port }}"
+          username: exporter
+          password: "{{ lookup('password', '/dev/null length=' ~ db_secret_length ~ ' chars=ascii_letters,digits') }}"
+          host_acl: "{{ db_exporter_host_acl }}"
+
+    - name: "exporter — store in the vault"
+      oracle.oci.oci_vault_secret:
+        compartment_id: "{{ compartment_ocid }}"
+        vault_id: "{{ oci_vault_id }}"
+        key_id: "{{ oci_vault_key_id }}"
+        secret_name: "{{ secret_prefix }}-mysql-exporter"
+        description: "MySQL credential for mysqld_exporter, managed by ansible"
+        secret_content:
+          content_type: BASE64
+          content: "{{ exporter_dsn | to_json | b64encode }}"
+        state: present
+        auth_type: "{{ oci_auth_type }}"
+      delegate_to: localhost
+      become: false
+
+- name: "exporter — read what already existed"
+  when: exporter_bundle is succeeded
+  ansible.builtin.set_fact:
+    exporter_dsn: >-
+      {{ exporter_bundle.secret_bundle.secret_bundle_content.content
+         | b64decode | from_json }}
+  no_log: true
+
+- name: "exporter — account and grants"
+  ansible.mysql.mysql_user:
+    login_host: "{{ db_admin.host }}"
+    login_port: "{{ db_admin.port }}"
+    login_user: "{{ db_admin.username }}"
+    login_password: "{{ db_admin.password }}"
+    name: "{{ exporter_dsn.username }}"
+    host: "{{ exporter_dsn.host_acl }}"
+    plugin: "{{ db_user_plugin }}"
+    plugin_auth_string: "{{ exporter_dsn.password }}"
+    salt: "{{ ((exporter_dsn.password ~ 'exporter') | hash('sha256'))[:20] }}"
+    priv: "*.*:PROCESS,REPLICATION CLIENT,SELECT"
+    max_user_connections: "{{ db_exporter_max_connections }}"
+    append_privs: false
+    state: present
+  no_log: true
+
+- name: "exporter — account"
+  ansible.builtin.debug:
+    msg: "{{ exporter_dsn.username }}@{{ exporter_dsn.host_acl }} : PROCESS,REPLICATION CLIENT,SELECT"

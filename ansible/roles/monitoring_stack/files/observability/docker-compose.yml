@@ -3,10 +3,11 @@ name: pscloud-observability
 x-common: &common
   restart: unless-stopped
   logging:
-    driver: json-file
-    options:
-      max-size: "10m"
-      max-file: "3"
+    # journald, not json-file: Fluent Bit already reads journald for host.err
+    # (observability_agent role) -- one more systemd input there, filtered to
+    # docker.service, picks up all five containers' stdout for free. Nothing
+    # per-container to configure; CONTAINER_NAME comes from Docker itself.
+    driver: journald
 
 services:
   victoriametrics:

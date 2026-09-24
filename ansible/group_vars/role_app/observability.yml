@@ -24,6 +24,17 @@ fluentbit_extra_inputs:
     storage.type: filesystem
     threaded: "on"
 
+  - name: tail
+    tag: nginx.error
+    path: "{{ nginx_error_log }}"
+    parser: nginx_error
+    refresh_interval: 5
+    mem_buf_limit: 8MB
+    skip_long_lines: "on"
+    db: /var/lib/fluent-bit/nginx_error.db
+    storage.type: filesystem
+    threaded: "on"
+
   - name: nginx_metrics
     tag: nginx_metrics
     host: 127.0.0.1
@@ -44,6 +55,10 @@ fluentbit_extra_filters:
 
   - name: modify
     match: nginx.access
+    add: job nginx
+
+  - name: modify
+    match: nginx.error
     add: job nginx
 
   - name: log_to_metrics
@@ -85,6 +100,17 @@ fluentbit_extra_outputs:
     host: "{{ monitoring_endpoints.logs.host }}"
     port: "{{ monitoring_endpoints.logs.port }}"
     uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,app"
+    format: json_lines
+    json_date_format: iso8601
+    compress: gzip
+    retry_limit: 5
+    storage.total_limit_size: 256M
+
+  - name: http
+    match: nginx.error
+    host: "{{ monitoring_endpoints.logs.host }}"
+    port: "{{ monitoring_endpoints.logs.port }}"
+    uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,level"
     format: json_lines
     json_date_format: iso8601
     compress: gzip

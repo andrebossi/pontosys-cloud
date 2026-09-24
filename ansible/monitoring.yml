@@ -5,6 +5,7 @@
   roles:
     - { role: base, tags: [base] }
     - { role: monitoring_stack, tags: [stack] }
+    - { role: mysqld_exporter, tags: [mysqld_exporter] }
     - { role: observability_agent, tags: [agent] }
 
     - role: robertdebock.fail2ban

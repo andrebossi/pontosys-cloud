@@ -42,10 +42,15 @@ VIRTUALSTORE_BACKEND="virtualstore relatoriosapi pixapi entradaapi dashsapi cada
 MONITORCLIENTES_BACKEND="monitorclientesapi geradorrelatoriosapi"
 BACKEND_APPS="$VIRTUALSTORE_BACKEND $MONITORCLIENTES_BACKEND"
 
-# State, not build output. These are linked_dirs: they live in
-# /srv/apps/<app>/shared and are symlinked into each release, so inside the
-# artifact a deploy would replace the live data with the tarball's copy.
-STATE="Contents Relatorios ArquivosFiscais Fonts logs"
+# Contents/Relatorios/ArquivosFiscais/Fonts are part of the app (templates,
+# fonts, reference content) and ship in the tarball now like everything
+# else -- they used to be excluded and seeded by hand via rsync, which meant
+# a fresh machine started without them until someone remembered to run it.
+#
+# logs is the one real exception: it's runtime output, not build output --
+# there is nothing to package, a fresh release just starts empty. Still a
+# linked_dir (see applications.yml), so it survives across releases.
+STATE="logs"
 
 # Build leftovers -- entradaapi and pixapi shipped a nested copy of themselves.
 JUNK="publish ref obj"
@@ -78,14 +83,3 @@ for site in $FRONTEND_SITES; do
   tar -C "$SRC/$site" -czf "$OUT/$site/$site-$VER.tar.gz" .
   pack "$site" "$OUT/$site/$site-$VER.tar.gz"
 done
-
-cat <<TXT
-
-State directories are excluded and are seeded once per machine:
-  rsync -a $SRC/virtualstore/Contents/          host:/srv/apps/virtualstore/shared/Contents/
-  rsync -a $SRC/virtualstore/Relatorios/        host:/srv/apps/virtualstore/shared/Relatorios/
-  rsync -a $SRC/pixapi/Contents/                host:/srv/apps/pixapi/shared/Contents/
-  rsync -a $SRC/cadastrosapi/ArquivosFiscais/   host:/srv/apps/cadastrosapi/shared/ArquivosFiscais/
-  rsync -a $SRC/relatoriosapi/Fonts/            host:/srv/apps/relatoriosapi/shared/Fonts/
-  rsync -a $SRC/relatoriosapi/Relatorios/       host:/srv/apps/relatoriosapi/shared/Relatorios/
-TXT

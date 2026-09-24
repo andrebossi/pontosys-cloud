@@ -173,7 +173,8 @@ Repeat for `pscloud-ssh-app` → `~/.ssh/pscloud-app`: with both keys on the
 monitoring host, it can reach the application VMs too, so `site.yml`,
 `database.yml` and `deploy.yml` all run from there against
 `inventories/production` / `inventories/rc` like any other host — Ansible
-itself, cloned or synced onto the box, plus its `.venv` (see Install above).
+itself, installed globally (`roles/ansible_manager`, run as part of
+`monitoring.yml`), no venv to activate.
 
 This box also has a public IP now (section 5), so `ssh -i ~/.ssh/pscloud-monitoring
 ubuntu@<its public IP>` works directly too, no Bastion session needed — this
@@ -186,13 +187,13 @@ confirmed: a persistent runner installed on this box is more attack surface
 than this needs, and routing every CI run through a fresh Bastion session
 added a round-trip for no real gain once the box has its own public IP
 anyway. Instead, this box has a public IP (see `infra/live/prod/monitoring`)
-and the GitHub Actions workflows (`rollout.yml`, `canary.yml`, `promote.yml`,
+and the GitHub Actions workflows (`rc.yml`, `canary.yml`, `promote.yml`,
 `image.yml`) SSH straight to it — one composite action,
 `.github/actions/run-on-monitoring`, does that; every workflow that needs
 `ansible-playbook` or `packer` calls it instead of repeating it. It assumes
-this box already has a persistent clone of this repo plus its own `.venv`
-(see Install above) — a one-time bootstrap, the same category of setup this
-box already needed by hand.
+this box already has a persistent clone of this repo plus Ansible installed
+globally on PATH -- `roles/ansible_manager`, run as part of `monitoring.yml`,
+does that bootstrap now instead of it being done by hand.
 
 The SSH key is still the same `pscloud-ssh-monitoring` Vault secret a human
 uses (section 4) — fetched with the existing CI OCI API key, the only OCI

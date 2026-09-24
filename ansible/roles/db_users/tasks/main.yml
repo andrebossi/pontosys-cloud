@@ -127,6 +127,10 @@
   loop_control:
     label: "{{ item.key }}"
 
+- name: Exporter account
+  ansible.builtin.include_tasks: exporter.yml
+  when: db_create_exporter_user | bool
+
 - name: Prune accounts no application claims
   ansible.builtin.include_tasks: prune.yml
   when: db_remove_unknown_users | bool

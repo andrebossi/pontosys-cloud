@@ -33,7 +33,7 @@ applications:
     port: 5000
     path: /virtualstore
     tier: site
-    linked_dirs: [logs, Contents, Relatorios]
+    linked_dirs: [logs]
     database:
       secret: db-virtualstore
       schemas:
@@ -68,7 +68,6 @@ applications:
     port: 5004
     path: /relatoriosapi
     tier: batch
-    linked_dirs: [Relatorios, Fonts]
 
   geradorrelatoriosapi:
     description: Gerador de relatórios
@@ -89,7 +88,6 @@ applications:
     port: 5006
     path: /cadastrosapi
     tier: api
-    linked_dirs: [ArquivosFiscais]
     database:
       secret: db-cadastrosapi
       schemas:
@@ -113,7 +111,6 @@ applications:
     port: 5008
     path: /pixapi
     tier: critical
-    linked_dirs: [Contents]
 
 static_sites:
   root:

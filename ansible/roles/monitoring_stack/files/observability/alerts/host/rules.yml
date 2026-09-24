@@ -1,0 +1,40 @@
+groups:
+  - name: host
+    rules:
+      - alert: HostMemoryHigh
+        expr: >-
+          100 * (1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) > 90
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance_name }} memory above 90%"
+          description: "{{ $value | printf \"%.1f\" }}% memory used for 5m+."
+
+      - alert: HostDiskSpaceLow
+        expr: >-
+          100 * (1 - node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"}
+                     / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) > 85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.instance_name }} disk {{ $labels.mountpoint }} above 85%"
+          description: "{{ $value | printf \"%.1f\" }}% used for 10m+."
+
+      - alert: HostSystemdUnitFailed
+        expr: node_systemd_unit_state{state="failed"} == 1
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance_name }} unit {{ $labels.name }} failed"
+          description: "systemd reports {{ $labels.name }} in the failed state for 2m+."
+
+      - alert: HostOOMKill
+        expr: increase(node_vmstat_oom_kill[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.instance_name }} OOM killer ran"
+          description: "The kernel OOM killer fired in the last 5m."

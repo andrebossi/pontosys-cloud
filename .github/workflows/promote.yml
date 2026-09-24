@@ -10,6 +10,15 @@ name: promote
 #   to=stable, from=canary (default): versions_canary.yml -> versions_stable.yml
 #   to=stable, from=rc (quick path) : versions_rc.yml -> versions_stable.yml,
 #                                      skipping canary entirely
+#
+# A full (weight=100%) promotion to stable also refreshes the stable pool's
+# own launch image afterwards -- images an already-updated stable instance
+# and points the pool at a new instance configuration built from it, OCI CLI
+# only (Terraform ignores this field on purpose, see app-tier/main.tf). Only
+# affects what the pool launches next (autoscale-outs, replacements) --
+# never touches instances already running. Skipped for a partial weight:
+# the pool would be a version-mixed bag at that point, nothing coherent to
+# image yet.
 
 on:
   workflow_dispatch:
@@ -121,7 +130,7 @@ jobs:
           command: |
             set -euo pipefail
             cd ~/pscloud && git fetch --quiet && git checkout --quiet "${{ steps.commit.outputs.sha }}"
-            cd ansible && source .venv/bin/activate
+            cd ansible
             if [ -z "$(ansible-inventory -i inventories/production --graph pool_canary | tail -n +2)" ]; then
               echo "pool_canary has no hosts -- run canary.yml action=up first." >&2
               exit 1
@@ -135,7 +144,64 @@ jobs:
             set -euo pipefail
             limit=${{ inputs.to == 'canary' && 'pool_canary' || 'pool_stable' }}
             cd ~/pscloud && git fetch --quiet && git checkout --quiet "${{ steps.commit.outputs.sha }}"
-            cd ansible && source .venv/bin/activate
+            cd ansible
             ansible-playbook -i inventories/production deploy.yml -l "$limit" \
               -e "deploy_serial=${{ inputs.weight }}" \
               -e 'deploy_apps=${{ steps.copy.outputs.apps_json }}'
+
+      - name: Refresh the stable pool's launch image
+        if: inputs.deploy && inputs.to == 'stable' && inputs.weight == '100%'
+        env:
+          OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
+          OCI_STABLE_POOL_ID: ${{ vars.OCI_STABLE_POOL_ID }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_CI_PRIVATE_KEY" > ~/.oci/ci_key.pem
+          chmod 600 ~/.oci/ci_key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_CI_USER_OCID
+          fingerprint=$OCI_CI_FINGERPRINT
+          tenancy=$OCI_CI_TENANCY_OCID
+          region=$OCI_CI_REGION
+          key_file=~/.oci/ci_key.pem
+          EOF
+          chmod 600 ~/.oci/config
+
+          instance_id=$(oci compute-management instance-pool list-instances \
+            --compartment-id "$OCI_COMPARTMENT_OCID" --instance-pool-id "$OCI_STABLE_POOL_ID" \
+            --query 'data[0].id' --raw-output)
+          [ "$instance_id" != "null" ] || { echo "pool_stable has no instance to image." >&2; exit 1; }
+
+          release=$(date +%Y%m%d%H%M%S)
+          image_id=$(oci compute instance create-image --instance-id "$instance_id" \
+            --display-name "pscloud-app-stable-$release" \
+            --freeform-tags "{\"pscloud_family\":\"app\",\"pscloud_built_by\":\"promote-stable\",\"pscloud_release\":\"$release\"}" \
+            --wait-for-state AVAILABLE --query 'data.id' --raw-output)
+
+          current_config_id=$(oci compute-management instance-pool get \
+            --instance-pool-id "$OCI_STABLE_POOL_ID" --query 'data."instance-configuration-id"' --raw-output)
+
+          oci compute-management instance-configuration get \
+            --instance-configuration-id "$current_config_id" \
+            --query 'data."instance-details"' > /tmp/instance-details.json
+          jq --arg img "$image_id" \
+            '."launch-details"."source-details"."image-id" = $img' \
+            /tmp/instance-details.json > /tmp/instance-details.new.json
+
+          new_config_id=$(oci compute-management instance-configuration create \
+            --compartment-id "$OCI_COMPARTMENT_OCID" \
+            --display-name "pscloud-ic-app-stable-$release" \
+            --instance-details file:///tmp/instance-details.new.json \
+            --query 'data.id' --raw-output)
+
+          oci compute-management instance-pool update \
+            --instance-pool-id "$OCI_STABLE_POOL_ID" --instance-configuration-id "$new_config_id" \
+            --wait-for-state RUNNING --force
+
+          {
+            echo "## Stable pool image refreshed"
+            echo "New image \`$image_id\`, new instance configuration \`$new_config_id\`."
+            echo "Doesn't touch instances already running -- only what the pool launches next (autoscale-outs, replacements)."
+          } >> "$GITHUB_STEP_SUMMARY"

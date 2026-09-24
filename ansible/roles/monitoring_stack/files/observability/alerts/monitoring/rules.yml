@@ -1,0 +1,56 @@
+groups:
+  - name: monitoring
+    rules:
+      - alert: VictoriaMetricsDiskLow
+        expr: vm_free_disk_space_bytes < 5e9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "VictoriaMetrics free disk below 5GB"
+          description: "{{ $value | printf \"%.0f\" }} bytes free for 5m+."
+
+      - alert: VictoriaMetricsIngestionErrors
+        expr: increase(vm_http_request_errors_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "VictoriaMetrics is rejecting writes"
+          description: "vm_http_request_errors_total increased in the last 5m."
+
+      - alert: VmalertExecutionErrors
+        expr: increase(vmalert_execution_errors_total[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "vmalert failed to evaluate rules"
+          description: "vmalert_execution_errors_total increased in the last 5m -- alerts may be silently stale."
+
+      # MySQL is OCI-managed -- these three are only the ones that matter for
+      # "could actually bring the database down", not the full mysqld_exporter
+      # dashboard's worth of metrics.
+      - alert: MySQLDown
+        expr: mysql_up == 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "mysqld_exporter can't reach MySQL"
+          description: "mysql_up has been 0 -- either the DB is down or the exporter lost access."
+
+      - alert: MySQLConnectionsNearLimit
+        expr: >-
+          mysql_global_status_threads_connected / mysql_global_variables_max_connections > 0.9
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL connections above 90% of max_connections"
+          description: "{{ $value | printf \"%.1f\" }}% of max_connections in use for 5m+ -- next connection attempts will start failing."
+
+      - alert: MySQLAbortedConnectionsHigh
+        expr: increase(mysql_global_status_aborted_connects[5m]) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "MySQL aborted connections rising"
+          description: "More than 10 aborted connection attempts in 5m -- often precedes an outage (auth, network, or connection exhaustion)."

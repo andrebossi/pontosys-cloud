@@ -1,0 +1,45 @@
+groups:
+  - name: app
+    rules:
+      - alert: Nginx5xxRateHigh
+        expr: >-
+          sum by (app) (rate(nginx_requests{status=~"5.."}[5m]))
+            / sum by (app) (rate(nginx_requests[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.app }} 5xx rate above 5%"
+          description: "{{ $value | printf \"%.1f\" }}% of requests to {{ $labels.app }} are 5xx."
+
+      - alert: Nginx400RateHigh
+        expr: >-
+          sum by (app) (rate(nginx_requests{status="400"}[5m]))
+            / sum by (app) (rate(nginx_requests[5m])) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }} 400 rate above 10%"
+          description: "{{ $value | printf \"%.1f\" }}% of requests to {{ $labels.app }} are 400."
+
+      - alert: Nginx404RateHigh
+        expr: >-
+          sum by (app) (rate(nginx_requests{status="404"}[5m]))
+            / sum by (app) (rate(nginx_requests[5m])) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }} 404 rate above 10%"
+          description: "{{ $value | printf \"%.1f\" }}% of requests to {{ $labels.app }} are 404."
+
+      - alert: NginxLatencyHigh
+        expr: >-
+          histogram_quantile(0.95, sum by (app, le) (rate(nginx_request_duration_seconds_bucket[5m]))) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.app }} p95 latency above 2s"
+          description: "p95 request latency for {{ $labels.app }} has been above 2s for 5m+."

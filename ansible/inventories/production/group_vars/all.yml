@@ -9,9 +9,6 @@ oci_auth_type: instance_principal
 
 db_create_schemas: false
 
-# No public IP and no ProxyCommand: this only resolves when the controller
-# is itself inside the VCN (the monitoring host -- see ansible/README.md #4),
-# reaching every private_ip the OCI dynamic inventory returns directly.
 ansible_user: ubuntu
 ssh_key_role: "{{ 'monitoring' if 'role_monitoring' in group_names else 'app' }}"
 ansible_ssh_private_key_file: "{{ lookup('env', 'HOME') }}/.ssh/pscloud-{{ ssh_key_role }}"

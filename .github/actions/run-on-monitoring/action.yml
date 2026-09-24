@@ -7,7 +7,7 @@ description: >
 #
 # Reads its OCI/Vault identity and the box's address from the CALLING JOB's
 # `env:` (not `inputs:` -- every workflow that uses this action sets the
-# same block, see any of rollout.yml/canary.yml/promote.yml/image.yml):
+# same block, see any of rc.yml/canary.yml/promote.yml/image.yml):
 #
 #   OCI_CI_TENANCY_OCID, OCI_CI_USER_OCID, OCI_CI_FINGERPRINT,
 #   OCI_CI_PRIVATE_KEY, OCI_CI_REGION     -- the existing CI OCI API key

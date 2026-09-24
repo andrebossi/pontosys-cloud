@@ -71,10 +71,6 @@
   when: io_rules is changed
   changed_when: true
 
-- name: Swap
-  ansible.builtin.include_tasks: swap.yml
-  when: swap_size_mb | int > 0
-
 - name: journald drop-in directory
   ansible.builtin.file:
     path: /etc/systemd/journald.conf.d

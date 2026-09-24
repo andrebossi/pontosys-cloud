@@ -43,7 +43,7 @@ jobs:
           command: |
             set -euo pipefail
             cd ~/pscloud && git fetch --quiet && git checkout --quiet "$GITHUB_SHA"
-            cd ansible && source .venv/bin/activate
+            cd ansible
             ansible-galaxy install -r requirements.yml
             ansible-playbook image.yml --syntax-check -i localhost,
             cd ../resources/packer
