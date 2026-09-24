@@ -1,5 +1,7 @@
 plugin: oracle.oci.oci
 
+auth_type: instance_principal
+
 regions:
   - sa-saopaulo-1
 
