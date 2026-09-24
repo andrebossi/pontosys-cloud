@@ -13,7 +13,9 @@ instance_states:
   - RUNNING
 
 include_host_filters:
-  - "defined_tags.get('pscloud', {}).get('environment') == 'prod'"
+  - >-
+    defined_tags.get('pscloud', {}).get('environment') == 'prod' and
+    defined_tags.get('pscloud', {}).get('role', '') in ['app', 'monitoring']
 
 hostname_format: private_ip
 
