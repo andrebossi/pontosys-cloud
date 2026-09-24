@@ -1,7 +1,16 @@
 ---
+- name: Check for the OCI udev symlink
+  ansible.builtin.stat:
+    path: /dev/oracleoci/oraclevdb
+  register: oraclevdb_symlink
+
+- name: Set the data disk device
+  ansible.builtin.set_fact:
+    monitoring_data_disk: "{{ '/dev/oracleoci/oraclevdb' if oraclevdb_symlink.stat.exists else '/dev/sdb' }}"
+
 - name: Partition the second disk
   community.general.parted:
-    device: /dev/oracleoci/oraclevdb
+    device: "{{ monitoring_data_disk }}"
     number: 1
     state: present
     fs_type: ext4
@@ -9,12 +18,12 @@
 - name: Filesystem
   community.general.filesystem:
     fstype: ext4
-    dev: /dev/oracleoci/oraclevdb1
+    dev: "{{ monitoring_data_disk }}1"
 
 - name: Mounted and in fstab
   ansible.posix.mount:
     path: /mnt/monitoring-data
-    src: /dev/oracleoci/oraclevdb1
+    src: "{{ monitoring_data_disk }}1"
     fstype: ext4
     state: mounted
 

@@ -90,6 +90,7 @@ locals {
     ]
 
     read_inventory = [
+      "to inspect compartments in compartment id ${local.c}",
       "to read instance-family in compartment id ${local.c}",
       "to read virtual-network-family in compartment id ${local.c}",
     ]
