@@ -3,10 +3,6 @@ name: pscloud-observability
 x-common: &common
   restart: unless-stopped
   logging:
-    # journald, not json-file: Fluent Bit already reads journald for host.err
-    # (observability_agent role) -- one more systemd input there, filtered to
-    # docker.service, picks up all five containers' stdout for free. Nothing
-    # per-container to configure; CONTAINER_NAME comes from Docker itself.
     driver: journald
 
 services:
@@ -65,8 +61,8 @@ services:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9428/health"]
       interval: 30s
       timeout: 5s
-      retries: 3
-      start_period: 30s
+      retries: 5
+      start_period: 90s
     deploy:
       resources:
         limits:
