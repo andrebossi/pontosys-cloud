@@ -6,7 +6,7 @@ regions:
   - sa-saopaulo-1
 
 compartments:
-  - compartment_ocid: "{{ lookup('env', 'OCI_COMPARTMENT_OCID') }}"
+  - compartment_ocid: "ocid1.tenancy.oc1..aaaaaaaa5lalh56ffqq2aorknmx3aokh5pekgj5hkplpbroue6ljcpdwqrtq"
     fetch_hosts_from_subcompartments: false
 
 instance_states:
