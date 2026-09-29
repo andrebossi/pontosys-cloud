@@ -43,7 +43,7 @@ inputs = {
   name = "${local.env.prefix}-monitoring"
 
   instances = {
-    "01" = { data_volume_size_in_gbs = 80, assign_public_ip = true }
+    "01" = { data_volume_size_in_gbs = 50, assign_public_ip = true }
   }
 
   shape         = "VM.Standard.A1.Flex"

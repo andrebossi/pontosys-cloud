@@ -15,8 +15,6 @@
     state: present
     update_cache: true
 
-# A drop-in, never a copy of the unit in /etc: that would mask the packaged one
-# and an upgrade changing ExecStart would be silently ignored.
 - name: No local copy shadowing it
   ansible.builtin.file:
     path: /etc/systemd/system/fluent-bit.service
@@ -57,9 +55,6 @@
   loop: "{{ fluentbit_extra_files }}"
   notify: reload fluent-bit
 
-# The node_exporter_metrics textfile collector reads this directory. It is the
-# bridge for what the agent does not collect on its own: per-cgroup memory,
-# swap and pressure, which is where an approaching OOM shows up first.
 - name: Textfile exporters
   ansible.builtin.copy:
     src: "{{ item.src }}"
@@ -107,8 +102,6 @@
     mode: "0644"
   notify: restart fluent-bit
 
-# validate runs before the file is written: an invalid configuration never
-# reaches disk, so the agent keeps running with the last good one.
 - name: Configuration
   ansible.builtin.template:
     src: fluent-bit.yaml.j2

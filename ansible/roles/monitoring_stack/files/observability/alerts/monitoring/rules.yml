@@ -26,9 +26,6 @@ groups:
           summary: "vmalert failed to evaluate rules"
           description: "vmalert_execution_errors_total increased in the last 5m -- alerts may be silently stale."
 
-      # MySQL is OCI-managed -- these three are only the ones that matter for
-      # "could actually bring the database down", not the full mysqld_exporter
-      # dashboard's worth of metrics.
       - alert: MySQLDown
         expr: mysql_up == 0
         labels:

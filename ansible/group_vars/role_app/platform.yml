@@ -1,13 +1,4 @@
 ---
-# Ceilings, in two levels, so one misbehaving app cannot take the box down
-# and the eight of them together cannot either:
-#
-#   apps.slice                    the group
-#     └ dotnet-app@<name>.service  one application
-
-# MemoryHigh is soft -- the kernel throttles and reclaims, which is the window
-# where the GC can still react. MemoryMax is hard, and crossing it is an OOM
-# kill. CPUQuota is also what makes the kernel fill throttled_usec in cpu.stat.
 app_tiers:
   site:
     memory_min: 128M
@@ -106,6 +97,5 @@ app_nginx_tiers:
     send_timeout: 600s
     client_max_body_size: 128m
 
-# The OCI image ships an INPUT chain ending in REJECT.
 base_open_ports:
   - "{{ nginx_listen_port }}"

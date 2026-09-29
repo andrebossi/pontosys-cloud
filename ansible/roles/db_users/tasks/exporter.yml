@@ -1,8 +1,4 @@
 ---
-# Same generate-on-first-use, store-immediately, read-back-ever-after shape as
-# credential.yml -- just for one fixed account instead of one per app, and not
-# tied to any applications.yml entry (the exporter isn't an application).
-
 - name: "exporter — read"
   oracle.oci.oci_secrets_secret_bundle_facts:
     secret_name: "{{ secret_prefix }}-mysql-exporter"

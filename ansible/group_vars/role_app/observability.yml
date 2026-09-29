@@ -1,5 +1,4 @@
 ---
-# WHAT THIS VM SENDS
 fluentbit_extra_inputs:
 
   - name: systemd

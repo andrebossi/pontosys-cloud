@@ -1,6 +1,6 @@
 ---
 mysqld_exporter_version: "0.20.0"
-mysqld_exporter_arch: linux-amd64
+mysqld_exporter_arch: linux-arm64
 mysqld_exporter_url: >-
   https://github.com/prometheus/mysqld_exporter/releases/download/v{{ mysqld_exporter_version }}/mysqld_exporter-{{ mysqld_exporter_version }}.{{ mysqld_exporter_arch }}.tar.gz
 

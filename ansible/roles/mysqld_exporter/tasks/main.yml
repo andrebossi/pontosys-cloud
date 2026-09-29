@@ -30,10 +30,6 @@
     creates: "{{ mysqld_exporter_bin }}"
     mode: "0755"
 
-# db_users/tasks/exporter.yml is what creates this -- ansible/database.yml,
-# run from a role_app host (already has network access to the DB). Same
-# generate-on-first-use, store-immediately, read-back-ever-after vault
-# pattern as everywhere else in this repo; this role only ever reads it.
 - name: Exporter credential
   oracle.oci.oci_secrets_secret_bundle_facts:
     secret_name: "{{ secret_prefix }}-mysql-exporter"

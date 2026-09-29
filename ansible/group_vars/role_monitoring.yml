@@ -13,15 +13,15 @@ grafana_log_max_days: 7
 
 monitoring_mem_budget_mb: 6144
 
-monitoring_data_volume_size_gb: 80
+monitoring_data_volume_size_gb: 50
 
-vm_mem_limit: 2G
-vm_mem_allowed: 1400MB
+vm_mem_limit: 3G
+vm_mem_allowed: 2048MB
 vm_cpus: "1.0"
 vm_max_queries: 4
 
-vl_mem_limit: 2G
-vl_mem_allowed: 1400MB
+vl_mem_limit: 3G
+vl_mem_allowed: 2048MB
 vl_cpus: "0.8"
 
 vmalert_mem_limit: 256M
@@ -29,9 +29,9 @@ alertmanager_mem_limit: 192M
 grafana_mem_limit: 768M
 
 vm_min_free_disk: 10GB
-vm_retention: 10d
-vl_max_disk_pct: 80
-vl_retention: 15d
+vm_retention: 7d
+vl_max_disk_pct: 20
+vl_retention: 7d
 
 fluentbit_backend_inputs:
   - name: prometheus_scrape
@@ -62,9 +62,6 @@ fluentbit_backend_inputs:
     scrape_interval: 60s
     processors: *backend_selector
 
-  # mysqld_exporter (role mysqld_exporter) -- default collector set, so this
-  # allowlist is the actual scope limiter: only the metrics the alerts in
-  # alerts/monitoring/rules.yml use, not the full exporter surface.
   - name: prometheus_scrape
     tag: backend_metrics
     host: 127.0.0.1
