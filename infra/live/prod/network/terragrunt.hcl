@@ -61,6 +61,8 @@ inputs = {
 
     monitoring-in-ssh     = { nsg = "monitoring", remotes = ["0.0.0.0/0"], ports = [22] }
     monitoring-in-grafana = { nsg = "monitoring", remotes = ["0.0.0.0/0"], ports = [local.env.grafana_port] }
+    monitoring-in-metrics = { nsg = "monitoring", remotes = ["app"], ports = [8428] }
+    monitoring-in-logs    = { nsg = "monitoring", remotes = ["app"], ports = [9428] }
     monitoring-out-any    = { nsg = "monitoring", direction = "EGRESS", protocol = "all", remotes = ["0.0.0.0/0"] }
   }
 
