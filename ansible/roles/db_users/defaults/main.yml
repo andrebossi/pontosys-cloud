@@ -2,9 +2,6 @@
 applications: {}
 oci_auth_type: instance_principal
 
-# Which applications this role touches: the ones whose catalog entry has a
-# `database:` block. That entry names the secret and the schemas, so there is
-# no second list anywhere.
 db_apps: >-
   {{ applications | dict2items | selectattr('value.database', 'defined') | list }}
 
@@ -15,9 +12,8 @@ db_user_pattern: "%_app"
 
 db_user_plugin: caching_sha2_password
 
-db_privileges_default: SELECT,INSERT,UPDATE,DELETE
-db_schema_privileges:
-  cep: SELECT
+db_privileges_default: ALL
+db_schema_privileges: {}
 
 db_create_schemas: false
 db_schema_encoding: utf8mb4
@@ -30,3 +26,4 @@ db_remove_unknown_users: false
 db_create_exporter_user: true
 db_exporter_host_acl: "10.20.0.%"
 db_exporter_max_connections: 3
+db_exporter_rotate: false

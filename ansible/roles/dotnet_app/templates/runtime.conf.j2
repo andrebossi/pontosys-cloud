@@ -18,3 +18,6 @@ Environment={{ k }}={{ v }}
 # ProtectSystem=strict makes the filesystem read-only. These are the only paths
 # the application may write, and the ones that survive a release.
 ReadWritePaths={{ home }}/shared
+{% if app.writable_release | default(false) %}
+ReadWritePaths={{ home }}/releases
+{% endif %}

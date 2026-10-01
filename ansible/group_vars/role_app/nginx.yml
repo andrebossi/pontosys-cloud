@@ -1,3 +1,7 @@
 ---
 nginx_static_root: /usr/share/nginx/html
 nginx_user: nginx
+
+nginx_exporter_version: 1.5.3
+nginx_exporter_scrape_uri: "http://127.0.0.1:{{ nginx_status_port }}/nginx_status"
+nginx_exporter_web_listen_address: 127.0.0.1:9113

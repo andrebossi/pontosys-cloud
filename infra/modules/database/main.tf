@@ -19,6 +19,7 @@ resource "oci_mysql_mysql_db_system" "this" {
   mysql_version       = var.mysql_version
 
   subnet_id      = var.db_subnet_id
+  nsg_ids        = var.db_nsg_ids
   hostname_label = replace("${var.label_prefix}mysql", "-", "")
   port           = var.db_port
 

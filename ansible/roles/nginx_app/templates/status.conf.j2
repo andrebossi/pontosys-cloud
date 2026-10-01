@@ -1,8 +1,8 @@
 # {{ ansible_managed }}
 #
 # stub_status on loopback: active, reading, writing and waiting connections
-# plus the accepted/handled/requests counters. This is what Fluent Bit's
-# nginx_metrics input scrapes -- no separate nginx-exporter process.
+# plus the accepted/handled/requests counters. nginx-prometheus-exporter
+# reads it and Fluent Bit scrapes the exporter.
 server {
     listen 127.0.0.1:{{ nginx_status_port }};
     server_name _;

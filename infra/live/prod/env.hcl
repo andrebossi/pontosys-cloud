@@ -25,6 +25,7 @@ locals {
 
   app_port     = 80
   db_port      = 3306
+  db_nlb_port  = 55336
   grafana_port = 3000
 
   db_fqdn = "${local.prefix}mysql.db.vcn.oraclevcn.com"

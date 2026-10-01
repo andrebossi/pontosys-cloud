@@ -57,7 +57,7 @@ inputs = {
 
     db-in-app        = { nsg = "db", remotes = ["app"], ports = [local.env.db_port] }
     db-in-monitoring = { nsg = "db", remotes = ["monitoring"], ports = [local.env.db_port] }
-    db-in-client     = { nsg = "db", remotes = local.env.db_client_cidrs, ports = [local.env.db_port] }
+    db-in-client     = { nsg = "db", remotes = local.env.db_client_cidrs, ports = [local.env.db_port, local.env.db_nlb_port] }
 
     monitoring-in-ssh     = { nsg = "monitoring", remotes = ["0.0.0.0/0"], ports = [22] }
     monitoring-in-grafana = { nsg = "monitoring", remotes = ["0.0.0.0/0"], ports = [local.env.grafana_port] }

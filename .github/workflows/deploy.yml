@@ -1,0 +1,104 @@
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ansible/group_vars/role_app/versions_rc.yml
+      - ansible/group_vars/role_app/versions_stable.yml
+  workflow_dispatch:
+    inputs:
+      channel:
+        type: choice
+        options: [stable, rc]
+        required: true
+      apps:
+        description: 'Limit to some apps, e.g. ["pixapi"]. Empty means all.'
+        default: ""
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+env:
+  OCI_CI_TENANCY_OCID: ${{ secrets.OCI_CI_TENANCY_OCID }}
+  OCI_CI_USER_OCID: ${{ secrets.OCI_CI_USER_OCID }}
+  OCI_CI_FINGERPRINT: ${{ secrets.OCI_CI_FINGERPRINT }}
+  OCI_CI_PRIVATE_KEY: ${{ secrets.OCI_CI_PRIVATE_KEY }}
+  OCI_CI_REGION: ${{ vars.OCI_CI_REGION }}
+  OCI_VAULT_OCID: ${{ vars.OCI_VAULT_OCID }}
+  OCI_MONITORING_IP: ${{ vars.OCI_MONITORING_IP }}
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      targets: ${{ steps.plan.outputs.targets }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: What changed
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          CHANNEL: ${{ inputs.channel }}
+          APPS: ${{ inputs.apps }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = workflow_dispatch ]; then
+            jq -cn --arg c "$CHANNEL" --arg a "$APPS" '[{channel: $c, apps: $a}]' > targets.json
+          else
+            echo '[]' > targets.json
+            for c in rc stable; do
+              f=ansible/group_vars/role_app/versions_$c.yml
+              flat=".release_groups_$c // {} | [.[] | to_entries | .[]] | from_entries"
+              old='{}'
+              if previous=$(git show "$BEFORE:$f" 2>/dev/null); then
+                old=$(yq -o=json "$flat" - <<< "$previous")
+              fi
+              new=$(yq -o=json "$flat" "$f")
+              changed=$(jq -cn --argjson o "$old" --argjson n "$new" '[$n | to_entries[] | select($o[.key] != .value) | .key]')
+              [ "$changed" = "[]" ] && continue
+              jq -c --arg c "$c" --arg a "$changed" '. + [{channel: $c, apps: $a}]' targets.json > t.json && mv t.json targets.json
+            done
+          fi
+          echo "targets=$(cat targets.json)" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "- **\(.channel)**: \(if .apps == "" then "all apps" else .apps end)"' targets.json >> "$GITHUB_STEP_SUMMARY"
+
+  deploy:
+    needs: plan
+    if: needs.plan.outputs.targets != '[]'
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.target.channel }}
+    strategy:
+      max-parallel: 1
+      fail-fast: false
+      matrix:
+        target: ${{ fromJson(needs.plan.outputs.targets) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ansible on the monitoring host
+        uses: ./.github/actions/run-on-monitoring
+        with:
+          command: |
+            set -euo pipefail
+            export OCI_VAULT_OCID='${{ vars.OCI_VAULT_OCID }}' OCI_COMPARTMENT_OCID='${{ vars.OCI_COMPARTMENT_OCID }}'
+            cd ~/pscloud/ansible
+            ansible-galaxy install -r requirements.yml > /dev/null
+            if [ '${{ matrix.target.channel }}' = stable ]; then
+              inventory=inventories/production; limit=pool_stable
+            else
+              inventory=inventories/rc; limit=role_app
+            fi
+            if ! ansible-inventory -i "$inventory" --graph "$limit" | grep -q -- '--'; then
+              echo "No hosts in $limit ($inventory)." >&2
+              exit 1
+            fi
+            extra=()
+            apps='${{ matrix.target.apps }}'
+            [ -n "$apps" ] && extra=(-e "deploy_apps=$apps")
+            ansible-playbook -i "$inventory" site.yml -l "$limit" "${extra[@]}"

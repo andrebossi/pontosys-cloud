@@ -1,0 +1,23 @@
+---
+ansible_manager_venv: /opt/ansible
+ansible_manager_packages:
+  - ansible==14.4.0
+  - oci==2.185.2
+ansible_manager_user: ubuntu
+ansible_manager_home: "/home/{{ ansible_manager_user }}"
+ansible_manager_github_secret: github-token
+ansible_manager_ssh_keys: [monitoring, app]
+ansible_manager_ssh_hosts:
+  - { pattern: "10.20.0.*", key: monitoring }
+  - { pattern: "10.20.*", key: app }
+ansible_manager_checkout: "{{ ansible_manager_home }}/pscloud"
+ansible_manager_repo: https://github.com/andrebossi/pontosys-cloud.git
+ansible_manager_env:
+  PSCLOUD_APP_IMAGE_ID: "{{ lookup('env', 'PSCLOUD_APP_IMAGE_ID') }}"
+  OCI_COMPARTMENT_OCID: "{{ compartment_ocid }}"
+  OCI_VAULT_OCID: "{{ oci_vault_id }}"
+  OCI_VAULT_KEY_OCID: "{{ oci_vault_key_id }}"
+ansible_manager_env_required:
+  - OCI_COMPARTMENT_OCID
+  - OCI_VAULT_OCID
+  - OCI_VAULT_KEY_OCID

@@ -29,7 +29,7 @@ fluentbit_base_inputs:
     systemd_include_pattern: (dotnet-app@.+\.service|nginx\.service|fluent-bit\.service|ssh\.service)
     systemd_service_restart_metrics: true
     systemd_unit_start_time_metrics: true
-    diskstats.ignore_device_regex: ^(ram|loop|fd|dm-)\d+$
+    diskstats.ignore_device_regex: ^(z?ram|loop|fd|dm-|(h|s|v|xv)d[a-z]|nvme\d+n\d+p)\d+$
     filesystem.ignore_mount_point_regex: ^/(dev|proc|sys|run)($|/)
     threaded: "on"
 
@@ -91,6 +91,7 @@ fluentbit_base_outputs:
     uri: "{{ monitoring_endpoints.metrics.uri }}"
     add_label:
       - instance ${INSTANCE_ID}
+      - instance_name ${INSTANCE_NAME}
       - fault_domain ${FD}
       - job oci-${ROLE}
     retry_limit: 5
@@ -100,7 +101,7 @@ fluentbit_base_outputs:
     match: host.err
     host: "{{ monitoring_endpoints.logs.host }}"
     port: "{{ monitoring_endpoints.logs.port }}"
-    uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,unit"
+    uri: "{{ monitoring_endpoints.logs.uri }}?{{ vl_query }}&_stream_fields=instance_name,job,SYSTEMD_UNIT"
     format: json_lines
     json_date_format: iso8601
     compress: gzip

@@ -53,7 +53,7 @@ BACKEND_APPS="$VIRTUALSTORE_BACKEND $MONITORCLIENTES_BACKEND"
 STATE="logs"
 
 # Build leftovers -- entradaapi and pixapi shipped a nested copy of themselves.
-JUNK="publish ref obj"
+JUNK="publish ref obj erro.log"
 
 # Virtualstore frontend, Ionic: the storefront's own files, at the root of
 # the document root.

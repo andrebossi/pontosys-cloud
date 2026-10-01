@@ -50,6 +50,7 @@ variable "admin_password" {
 
 variable "db_subnet_id" { type = string }
 variable "nlb_subnet_id" { type = string }
+variable "db_nsg_ids" { type = list(string) }
 variable "nlb_nsg_ids" { type = list(string) }
 
 variable "expose_nlb" {

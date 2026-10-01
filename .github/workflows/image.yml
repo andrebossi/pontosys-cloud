@@ -11,11 +11,6 @@ name: golden image
 # no OCI key in GitHub beyond the existing CI identity.
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - ansible/**
-      - resources/packer/**
   workflow_dispatch:
     inputs:
       env:
@@ -37,13 +32,14 @@ jobs:
       OCI_MONITORING_IP: ${{ vars.OCI_MONITORING_IP }}
       OCI_COMPARTMENT_OCID: ${{ vars.OCI_COMPARTMENT_OCID }}
     steps:
+      - uses: actions/checkout@v4
+
       - name: Build, print the OCID, prune old images
         uses: ./.github/actions/run-on-monitoring
         with:
           command: |
             set -euo pipefail
-            cd ~/pscloud && git fetch --quiet && git checkout --quiet "$GITHUB_SHA"
-            cd ansible
+            cd ~/pscloud/ansible
             ansible-galaxy install -r requirements.yml
             ansible-playbook image.yml --syntax-check -i localhost,
             cd ../resources/packer

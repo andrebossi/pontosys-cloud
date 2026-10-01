@@ -1,19 +1,9 @@
 ---
-# app_settings_*  non-secret, rendered into shared/appsettings.Production.json
-#                 and overlaid by .NET on top of the artifact's own
-#                 appsettings.json
-# Secrets are NOT here. They are one line in the application's own catalog
-# entry -- `secrets: {ENV_VAR: name}` in applications.yml -- and are rendered
-# into /etc/dotnet-apps/<app>.env, which outranks every JSON file.
-#
-# Nesting in an env var uses "__". The blocks below mirror what each app reads
-# today; only the user and the host change -- each one now connects as its own
-# <app>_app account instead of the shared glb_user and cep_user.
-
 app_public_url: "https://virtualstore.pontosys.com"
 
-# The apps ship their own logs to Graylog through Serilog; Fluent Bit collects
-# the unit's stdout/stderr and the host on top of that.
+url_monitorclientesapi: "http://127.0.0.1:{{ applications.monitorclientesapi.port }}{{ applications.monitorclientesapi.path }}"
+url_geradorrelatoriosapi: "http://127.0.0.1:{{ applications.geradorrelatoriosapi.port }}{{ applications.geradorrelatoriosapi.path }}"
+
 _serilog: &serilog
   LogCustom:
     Graylog:
@@ -28,23 +18,18 @@ _serilog: &serilog
         Microsoft.AspNetCore.DataProtection.KeyManagement.XmlKeyManager: Fatal
         Serilog.AspNetCore.RequestLoggingMiddleware: Fatal
 
-# The storefront family. Audience and issuer are not secrets; the signing key
-# is, so it lives in the application's `secrets:` map instead.
 _token_vs: &token_vs
   TokenConfigurations:
     Audience: VSAudiencePS
     Issuer: VSIssuerPS
     Seconds: 86400
 
-# monitorclientesapi and geradorrelatoriosapi share an issuer and a key: the
-# reports API validates tokens the directory minted.
 _token_mc: &token_mc
   TokenConfigurations:
     Audience: MonitorClientesVirtualStore
     Issuer: "Ponto.Sys Sistemas"
     HoursExpires: 12
 
-# Applied to every app, then overlaid by the per-app block.
 app_settings_common:
   AllowedHosts: "*"
   Logging:
@@ -56,7 +41,7 @@ app_settings:
   virtualstore:
     <<: [*serilog, *token_vs]
     UrlApis:
-      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+      MonitorClientes: "{{ url_monitorclientesapi }}"
     Links:
       UrlConfirmacaoEmail: "{{ app_public_url }}/#/confirmar-email/"
       UrlRecupecaoSenha: "{{ app_public_url }}/app/#/recuperar-senha/"
@@ -78,15 +63,13 @@ app_settings:
   dashsapi:
     <<: [*serilog, *token_vs]
     UrlApis:
-      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+      MonitorClientes: "{{ url_monitorclientesapi }}"
 
   relatoriosapi:
     <<: [*serilog, *token_vs]
-    # `Relatorios`, not `MonitorRelatorios` -- this app reads a different key
-    # from the one cadastrosapi reads.
     UrlApis:
-      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
-      Relatorios: "{{ app_public_url }}/geradorrelatoriosapi"
+      MonitorClientes: "{{ url_monitorclientesapi }}"
+      Relatorios: "{{ url_geradorrelatoriosapi }}"
 
   geradorrelatoriosapi:
     <<: *token_mc
@@ -94,13 +77,13 @@ app_settings:
   cadastrosapi:
     <<: [*serilog, *token_vs]
     UrlApis:
-      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
-      MonitorRelatorios: "{{ app_public_url }}/geradorrelatoriosapi"
+      MonitorClientes: "{{ url_monitorclientesapi }}"
+      MonitorRelatorios: "{{ url_geradorrelatoriosapi }}"
 
   entradaapi:
     <<: [*serilog, *token_vs]
     UrlApis:
-      MonitorClientes: "{{ app_public_url }}/monitorclientesapi"
+      MonitorClientes: "{{ url_monitorclientesapi }}"
 
   pixapi: {}
 

@@ -1,8 +1,17 @@
 ---
 - name: Database
-  hosts: role_app
+  hosts: role_monitoring
   become: true
   gather_facts: false
+  vars_files:
+    - group_vars/role_app/applications.yml
   roles:
     - role: db_users
       run_once: true
+
+- name: Exporter picks up a rotated password
+  hosts: role_monitoring
+  become: true
+  roles:
+    - role: mysqld_exporter
+      when: db_exporter_rotate | default(false) | bool

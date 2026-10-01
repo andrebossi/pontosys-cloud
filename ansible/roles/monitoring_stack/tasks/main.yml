@@ -4,12 +4,16 @@
 
 - name: The container limits fit the machine
   ansible.builtin.assert:
-    that: container_mb <= monitoring_mem_budget_mb
+    that:
+      - container_mb <= monitoring_mem_budget_mb
+      - (vm_mem_allowed | human_to_bytes) <= (vm_mem_limit | human_to_bytes) * 0.7
+      - (vl_mem_allowed | human_to_bytes) <= (vl_mem_limit | human_to_bytes) * 0.7
     fail_msg: >-
       The container limits add up to {{ container_mb }} MB, over the
       {{ monitoring_mem_budget_mb }} MB allocated to the monitoring stack on a
       {{ (ansible_facts['memtotal_mb'] / 1024) | round(1) }} GB machine that also runs
-      other things. Lower a limit or raise monitoring_mem_budget_mb.
+      other things, or a *_mem_allowed above 70% of its container limit.
+      Lower a limit or raise monitoring_mem_budget_mb.
     success_msg: "{{ container_mb }} MB of {{ monitoring_mem_budget_mb }} MB allocated"
     quiet: true
   vars:

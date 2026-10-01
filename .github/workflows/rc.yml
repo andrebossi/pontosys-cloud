@@ -107,7 +107,6 @@ jobs:
         with:
           command: |
             set -euo pipefail
-            cd ~/pscloud && git fetch --quiet && git checkout --quiet '${{ steps.commit.outputs.sha || github.sha }}'
-            cd ansible
+            cd ~/pscloud/ansible
             ansible-galaxy install -r requirements.yml
             ansible-playbook -i inventories/rc deploy.yml -l role_app -e deploy_serial=1 ${{ steps.filter.outputs.arg }}

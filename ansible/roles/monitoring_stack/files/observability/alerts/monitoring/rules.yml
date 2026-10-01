@@ -11,7 +11,7 @@ groups:
           description: "{{ $value | printf \"%.0f\" }} bytes free for 5m+."
 
       - alert: VictoriaMetricsIngestionErrors
-        expr: increase(vm_http_request_errors_total[5m]) > 0
+        expr: increase(vm_http_request_errors_total{job="victoriametrics", path=~".*/(write|import).*"}[5m]) > 0
         labels:
           severity: warning
         annotations:
@@ -26,13 +26,32 @@ groups:
           summary: "vmalert failed to evaluate rules"
           description: "vmalert_execution_errors_total increased in the last 5m -- alerts may be silently stale."
 
+  - name: database
+    rules:
       - alert: MySQLDown
         expr: mysql_up == 0
+        for: 2m
         labels:
           severity: critical
         annotations:
           summary: "mysqld_exporter can't reach MySQL"
           description: "mysql_up has been 0 -- either the DB is down or the exporter lost access."
+
+      - alert: MySQLExporterMissing
+        expr: lag(mysql_up[1h]) > 180
+        labels:
+          severity: warning
+        annotations:
+          summary: "No MySQL metrics for {{ $value | humanizeDuration }}"
+          description: "mysqld_exporter on the monitoring host stopped reporting, so MySQLDown can't fire either."
+
+      - alert: MySQLRestarted
+        expr: mysql_global_status_uptime < 600
+        labels:
+          severity: warning
+        annotations:
+          summary: "MySQL restarted {{ $value | humanizeDuration }} ago"
+          description: "Restart or failover. The caching_sha2_password cache is empty after it: accounts that connect without TLS and without AllowPublicKeyRetrieval fail until it is primed again."
 
       - alert: MySQLConnectionsNearLimit
         expr: >-
@@ -42,7 +61,15 @@ groups:
           severity: critical
         annotations:
           summary: "MySQL connections above 90% of max_connections"
-          description: "{{ $value | printf \"%.1f\" }}% of max_connections in use for 5m+ -- next connection attempts will start failing."
+          description: "{{ $value | humanizePercentage }} of max_connections in use for 5m+ -- next connection attempts will start failing."
+
+      - alert: MySQLConnectionsRefused
+        expr: increase(mysql_global_status_connection_errors_total{error="max_connections"}[5m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "MySQL is refusing connections: max_connections reached"
+          description: "{{ $value | printf \"%.0f\" }} connections refused in 5m. The apps are getting errors right now."
 
       - alert: MySQLAbortedConnectionsHigh
         expr: increase(mysql_global_status_aborted_connects[5m]) > 10
@@ -51,3 +78,28 @@ groups:
         annotations:
           summary: "MySQL aborted connections rising"
           description: "More than 10 aborted connection attempts in 5m -- often precedes an outage (auth, network, or connection exhaustion)."
+
+      - alert: MySQLThreadsRunningHigh
+        expr: mysql_global_status_threads_running > 20
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} MySQL queries running at once"
+          description: "Sustained concurrency above 20 for 5m+: queries are queueing on CPU or locks and latency climbs for every tenant."
+
+      - alert: MySQLSlowQueries
+        expr: increase(mysql_global_status_slow_queries[5m]) > 10
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} slow MySQL queries in 5m"
+          description: "Queries slower than long_query_time. Check the MySQL dashboard and the slow log."
+
+      - alert: MySQLDeadlocks
+        expr: increase(mysql_info_schema_innodb_metrics_lock_lock_deadlocks_total[10m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $value | printf \"%.0f\" }} InnoDB deadlocks in 10m"
+          description: "Transactions are being rolled back by InnoDB; the apps see these as errors on save."

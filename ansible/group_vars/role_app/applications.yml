@@ -20,7 +20,7 @@
 #
 #   secrets      anything else the application reads from the vault:
 #                  ENV_VAR_NAME: vault-name   (again without the prefix)
-#                These are created by hand; see REQUIREMENTS.md.
+#                These are created by hand; see docs/01-bootstrap.md.
 #
 # Every secret an application uses is named here. Nothing is derived from the
 # application's name, so grepping for a vault name finds every use of it.
@@ -111,6 +111,7 @@ applications:
     port: 5008
     path: /pixapi
     tier: critical
+    writable_release: true
 
 static_sites:
   root:

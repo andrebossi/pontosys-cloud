@@ -18,7 +18,7 @@
     fail_msg: >-
       oci_vault_id is empty, so the {{ app_secret_names | length }} secrets this
       host needs cannot be read. It comes from OCI_VAULT_OCID; see
-      keys/.env.example, then `source keys/.env`.
+      .env.example, then `source keys/.env`.
     quiet: true
 
 - name: Secrets

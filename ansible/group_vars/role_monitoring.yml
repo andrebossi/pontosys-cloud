@@ -1,7 +1,5 @@
 ---
 base_sysctl:
-  # VictoriaMetrics/VictoriaLogs mmap their storage files heavily; the
-  # default 65530 is reached long before memory is.
   vm.max_map_count: "262144"
 
   fs.file-max: "200000"
@@ -15,13 +13,13 @@ monitoring_mem_budget_mb: 6144
 
 monitoring_data_volume_size_gb: 50
 
-vm_mem_limit: 3G
-vm_mem_allowed: 2048MB
+vm_mem_limit: 2512MB
+vm_mem_allowed: 1500MB
 vm_cpus: "1.0"
 vm_max_queries: 4
 
-vl_mem_limit: 3G
-vl_mem_allowed: 2048MB
+vl_mem_limit: 2G
+vl_mem_allowed: 1200MB
 vl_cpus: "0.8"
 
 vmalert_mem_limit: 256M
@@ -33,42 +31,51 @@ vm_retention: 7d
 vl_max_disk_pct: 20
 vl_retention: 7d
 
+mysqld_exporter_version: 0.20.0
+mysqld_exporter_web_listen_address: 127.0.0.1:9104
+mysqld_exporter_username: "{{ mysqld_exporter_dsn.username }}"
+mysqld_exporter_password: "{{ mysqld_exporter_dsn.password }}"
+mysqld_exporter_host: "{{ mysqld_exporter_dsn.host }}"
+mysqld_exporter_port: "{{ mysqld_exporter_dsn.port }}"
+mysqld_exporter_enabled_collectors:
+  - info_schema.processlist
+  - info_schema.innodb_metrics
+  - info_schema.tables:
+      databases: virtualstoreglobal,cep
+
 fluentbit_backend_inputs:
   - name: prometheus_scrape
-    tag: backend_metrics
+    tag: backend.victoriametrics
     host: 127.0.0.1
     port: 8428
     metrics_path: /metrics
     scrape_interval: 60s
-    processors: &backend_selector
-      metrics:
-        - name: metrics_selector
-          metric_name: /^(vm_app_uptime_seconds|vm_available_memory_bytes|vm_data_size_bytes|vm_free_disk_space_bytes|vm_rows_added_to_storage_total|vm_slow_.*|vm_http_request_errors_total|vm_log_messages_total|vl_.*|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|mysql_up|mysql_global_status_.*|mysql_global_variables_max_connections|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
-          action: include
 
   - name: prometheus_scrape
-    tag: backend_metrics
+    tag: backend.victorialogs
     host: 127.0.0.1
     port: 9428
     metrics_path: /metrics
     scrape_interval: 60s
-    processors: *backend_selector
 
   - name: prometheus_scrape
-    tag: backend_metrics
+    tag: backend.vmalert
     host: 127.0.0.1
     port: 8880
     metrics_path: /metrics
     scrape_interval: 60s
-    processors: *backend_selector
+    processors:
+      metrics:
+        - name: metrics_selector
+          metric_name: /^(vm_app_version|vm_app_uptime_seconds|vm_http_request_errors_total|vm_log_messages_total|vmalert_alerting_rules_.*|vmalert_execution_.*|vmalert_remotewrite_errors_total|process_resident_memory_bytes|process_cpu_seconds_total|go_goroutines)$/
+          action: include
 
   - name: prometheus_scrape
-    tag: backend_metrics
+    tag: backend.mysqld
     host: 127.0.0.1
     port: 9104
     metrics_path: /metrics
     scrape_interval: 60s
-    processors: *backend_selector
 
   - name: systemd
     tag: monitoring.log
@@ -86,6 +93,13 @@ fluentbit_backend_filters:
     match: monitoring.log
     add: job monitoring
 
+_backend_write: &backend_write
+  name: prometheus_remote_write
+  host: "{{ monitoring_endpoints.metrics.host }}"
+  port: "{{ monitoring_endpoints.metrics.port }}"
+  uri: "{{ monitoring_endpoints.metrics.uri }}"
+  retry_limit: 5
+
 fluentbit_backend_outputs:
   - name: http
     match: monitoring.log
@@ -97,6 +111,34 @@ fluentbit_backend_outputs:
     compress: gzip
     retry_limit: 5
     storage.total_limit_size: 256M
+
+  - <<: *backend_write
+    match: backend.victoriametrics
+    add_label:
+      - job victoriametrics
+      - instance ${INSTANCE_ID}
+      - instance_name ${INSTANCE_NAME}
+
+  - <<: *backend_write
+    match: backend.victorialogs
+    add_label:
+      - job victorialogs
+      - instance ${INSTANCE_ID}
+      - instance_name ${INSTANCE_NAME}
+
+  - <<: *backend_write
+    match: backend.vmalert
+    add_label:
+      - job vmalert
+      - instance ${INSTANCE_ID}
+      - instance_name ${INSTANCE_NAME}
+
+  - <<: *backend_write
+    match: backend.mysqld
+    add_label:
+      - job mysqld
+      - instance ${INSTANCE_ID}
+      - instance_name ${INSTANCE_NAME}
 
 monitoring_host: 127.0.0.1
 

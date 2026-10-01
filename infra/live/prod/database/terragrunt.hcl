@@ -42,11 +42,13 @@ inputs = {
   admin_username = dependency.platform.outputs.db_admin_username
   admin_password = dependency.platform.outputs.db_admin_password
 
-  db_subnet_id  = dependency.network.outputs.subnet_ids.db
-  nlb_subnet_id = dependency.network.outputs.subnet_ids.public
-  nlb_nsg_ids   = [dependency.network.outputs.nsg_ids.db]
-  db_port       = local.env.db_port
-  expose_nlb    = true
+  db_subnet_id     = dependency.network.outputs.subnet_ids.db
+  nlb_subnet_id    = dependency.network.outputs.subnet_ids.public
+  db_nsg_ids       = [dependency.network.outputs.nsg_ids.db]
+  nlb_nsg_ids      = [dependency.network.outputs.nsg_ids.db]
+  db_port          = local.env.db_port
+  db_listener_port = local.env.db_nlb_port
+  expose_nlb       = true
 
   backup = {
     retention_in_days = 7

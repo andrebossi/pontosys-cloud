@@ -34,13 +34,17 @@ fluentbit_extra_inputs:
     storage.type: filesystem
     threaded: "on"
 
-  - name: nginx_metrics
+  - name: prometheus_scrape
     tag: nginx_metrics
     host: 127.0.0.1
-    port: "{{ nginx_status_port }}"
-    status_url: /nginx_status
-    nginx_plus: "off"
-    scrape_interval: 30
+    port: 9113
+    metrics_path: /metrics
+    scrape_interval: 30s
+    processors:
+      metrics:
+        - name: metrics_selector
+          metric_name: /^(nginx_.*|nginxexporter_build_info)$/
+          action: include
 
 fluentbit_extra_filters:
   - name: lua

@@ -1,0 +1,141 @@
+---
+- name: Packages
+  ansible.builtin.apt:
+    name: [python3-venv, git]
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Ansible and the OCI SDK
+  ansible.builtin.pip:
+    name: "{{ ansible_manager_packages }}"
+    virtualenv: "{{ ansible_manager_venv }}"
+    virtualenv_command: python3 -m venv
+
+- name: On PATH
+  ansible.builtin.file:
+    src: "{{ ansible_manager_venv }}/bin/{{ item }}"
+    path: "/usr/local/bin/{{ item }}"
+    state: link
+  loop: [ansible, ansible-playbook, ansible-inventory, ansible-galaxy, ansible-config]
+
+- name: SSH directory
+  ansible.builtin.file:
+    path: "{{ ansible_manager_home }}/.ssh"
+    state: directory
+    owner: "{{ ansible_manager_user }}"
+    group: "{{ ansible_manager_user }}"
+    mode: "0700"
+
+- name: Secrets from the vault
+  oracle.oci.oci_secrets_secret_bundle_facts:
+    secret_name: "{{ secret_prefix }}-{{ item }}"
+    vault_id: "{{ oci_vault_id }}"
+    stage: CURRENT
+    auth_type: "{{ oci_auth_type }}"
+  delegate_to: localhost
+  become: false
+  loop: "{{ [ansible_manager_github_secret] + ansible_manager_ssh_keys | map('regex_replace', '^(.*)$', 'ssh-\\1-priv') | list }}"
+  register: connection_secrets
+  changed_when: false
+  no_log: true
+
+- name: Values
+  ansible.builtin.set_fact:
+    connection_secret_values: >-
+      {{ dict(connection_secrets.results | map(attribute='item')
+              | zip(connection_secrets.results
+                    | map(attribute='secret_bundle.secret_bundle_content.content')
+                    | map('b64decode'))) }}
+  no_log: true
+
+- name: SSH keys
+  ansible.builtin.copy:
+    content: "{{ connection_secret_values['ssh-' ~ item ~ '-priv'] | trim }}\n"
+    dest: "{{ ansible_manager_home }}/.ssh/pscloud-{{ item }}"
+    owner: "{{ ansible_manager_user }}"
+    group: "{{ ansible_manager_user }}"
+    mode: "0600"
+  loop: "{{ ansible_manager_ssh_keys }}"
+  no_log: true
+
+- name: SSH uses them
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_manager_home }}/.ssh/config"
+    create: true
+    owner: "{{ ansible_manager_user }}"
+    group: "{{ ansible_manager_user }}"
+    mode: "0600"
+    marker: "# {mark} ansible_manager"
+    block: |
+      {% for h in ansible_manager_ssh_hosts %}
+      Host {{ h.pattern }}
+        User {{ ansible_manager_user }}
+        IdentityFile {{ ansible_manager_home }}/.ssh/pscloud-{{ h.key }}
+        IdentitiesOnly yes
+        StrictHostKeyChecking accept-new
+      {% endfor %}
+
+- name: GitHub token
+  ansible.builtin.copy:
+    content: "https://x-access-token:{{ connection_secret_values[ansible_manager_github_secret] | trim }}@github.com\n"
+    dest: "{{ ansible_manager_home }}/.git-credentials"
+    owner: "{{ ansible_manager_user }}"
+    group: "{{ ansible_manager_user }}"
+    mode: "0600"
+  no_log: true
+
+- name: Git uses it
+  community.general.git_config:
+    name: credential.helper
+    value: store
+    scope: global
+  become: true
+  become_user: "{{ ansible_manager_user }}"
+
+- name: Repository
+  ansible.builtin.git:
+    repo: "{{ ansible_manager_repo }}"
+    dest: "{{ ansible_manager_checkout }}"
+    version: main
+    update: false
+  become_user: "{{ ansible_manager_user }}"
+
+- name: Collections and roles
+  ansible.builtin.command:
+    cmd: "{{ ansible_manager_venv }}/bin/ansible-galaxy install -r requirements.yml"
+    chdir: "{{ ansible_manager_checkout }}/ansible"
+  become_user: "{{ ansible_manager_user }}"
+  register: galaxy
+  changed_when: "'was installed successfully' in galaxy.stdout"
+
+- name: What the shell environment is missing
+  ansible.builtin.set_fact:
+    ansible_manager_env_missing: >-
+      {{ ansible_manager_env_required
+         | reject('in', ansible_manager_env | dict2items | rejectattr('value', 'equalto', '') | map(attribute='key'))
+         | list }}
+
+- name: Shell environment kept as it is
+  ansible.builtin.debug:
+    msg: >-
+      ~/.env not rewritten: {{ ansible_manager_env_missing | join(', ') }} empty
+      in this shell. Run with keys/.env sourced to refresh it.
+  when: ansible_manager_env_missing | length > 0
+
+- name: Shell environment
+  ansible.builtin.template:
+    src: env.j2
+    dest: "{{ ansible_manager_home }}/.env"
+    owner: "{{ ansible_manager_user }}"
+    group: "{{ ansible_manager_user }}"
+    mode: "0600"
+  when: ansible_manager_env_missing | length == 0
+
+- name: Loaded on login
+  ansible.builtin.blockinfile:
+    path: "{{ ansible_manager_home }}/.bashrc"
+    marker: "# {mark} ansible_manager"
+    block: |
+      [ -f "$HOME/.env" ] && . "$HOME/.env"
+      [ -f "{{ ansible_manager_venv }}/bin/activate" ] && . "{{ ansible_manager_venv }}/bin/activate"

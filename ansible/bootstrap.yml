@@ -1,0 +1,6 @@
+---
+- name: Monitoring host becomes the Ansible controller
+  hosts: role_monitoring
+  become: true
+  roles:
+    - ansible_manager

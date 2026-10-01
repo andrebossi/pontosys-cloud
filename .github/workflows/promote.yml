@@ -129,8 +129,7 @@ jobs:
         with:
           command: |
             set -euo pipefail
-            cd ~/pscloud && git fetch --quiet && git checkout --quiet "${{ steps.commit.outputs.sha }}"
-            cd ansible
+            cd ~/pscloud/ansible
             if [ -z "$(ansible-inventory -i inventories/production --graph pool_canary | tail -n +2)" ]; then
               echo "pool_canary has no hosts -- run canary.yml action=up first." >&2
               exit 1
@@ -143,8 +142,7 @@ jobs:
           command: |
             set -euo pipefail
             limit=${{ inputs.to == 'canary' && 'pool_canary' || 'pool_stable' }}
-            cd ~/pscloud && git fetch --quiet && git checkout --quiet "${{ steps.commit.outputs.sha }}"
-            cd ansible
+            cd ~/pscloud/ansible
             ansible-playbook -i inventories/production deploy.yml -l "$limit" \
               -e "deploy_serial=${{ inputs.weight }}" \
               -e 'deploy_apps=${{ steps.copy.outputs.apps_json }}'

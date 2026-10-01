@@ -12,6 +12,7 @@
     - { role: base, tags: [base] }
     - { role: dotnet_runtime, tags: [runtime] }
     - { role: nginx_app, tags: [nginx] }
+    - { role: prometheus.prometheus.nginx_exporter, tags: [nginx, nginx_exporter] }
     - { role: dotnet_app, tags: [apps] }
     - { role: app_deploy, tags: [apps, deploy] }
     - { role: observability_agent, tags: [agent] }

@@ -11,13 +11,16 @@ description: >
 #
 #   OCI_CI_TENANCY_OCID, OCI_CI_USER_OCID, OCI_CI_FINGERPRINT,
 #   OCI_CI_PRIVATE_KEY, OCI_CI_REGION     -- the existing CI OCI API key
-#   OCI_VAULT_OCID                       -- to fetch pscloud-ssh-monitoring
+#   OCI_VAULT_OCID                       -- to fetch pscloud-ssh-monitoring-priv
 #   OCI_MONITORING_IP                    -- the box's public IP
 
 inputs:
   command:
     description: Shell command to run on the monitoring box, as the ubuntu user.
     required: true
+  sync:
+    description: Check out this job's commit in ~/pscloud on the box before running the command.
+    default: "true"
 
 outputs:
   output:
@@ -46,11 +49,20 @@ runs:
     - name: Fetch the monitoring host's SSH key from Vault
       shell: bash
       run: |
+        mkdir -p ~/.ssh && chmod 700 ~/.ssh
         oci secrets secret-bundle get-secret-bundle-by-name \
-          --secret-name pscloud-ssh-monitoring --vault-id "$OCI_VAULT_OCID" \
+          --secret-name pscloud-ssh-monitoring-priv --vault-id "$OCI_VAULT_OCID" \
           --query 'data."secret-bundle-content".content' --raw-output \
           | base64 -d > ~/.ssh/pscloud-monitoring
         chmod 600 ~/.ssh/pscloud-monitoring
+
+    - name: Check out this job's commit on the box
+      if: inputs.sync == 'true'
+      shell: bash
+      run: |
+        sha=$(git -C "$GITHUB_WORKSPACE" rev-parse HEAD)
+        ssh -o StrictHostKeyChecking=accept-new -i ~/.ssh/pscloud-monitoring ubuntu@"$OCI_MONITORING_IP" \
+          "cd ~/pscloud && git fetch --quiet origin && git checkout --quiet --force $sha"
 
     - name: Run it
       id: run
