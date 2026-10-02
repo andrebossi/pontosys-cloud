@@ -11,7 +11,8 @@
     plugin_auth_string: "{{ exporter_dsn.password }}"
     salt: "{{ ((exporter_dsn.password ~ 'exporter') | hash('sha256'))[:20] }}"
     priv: "*.*:PROCESS,REPLICATION CLIENT,SELECT"
-    max_user_connections: "{{ db_exporter_max_connections }}"
+    resource_limits:
+      MAX_USER_CONNECTIONS: "{{ db_exporter_max_connections | int }}"
     append_privs: false
     state: present
   no_log: true
