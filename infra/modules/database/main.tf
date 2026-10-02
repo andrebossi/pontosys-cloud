@@ -10,6 +10,20 @@ locals {
   nlb_count = var.expose_nlb ? 1 : 0
 }
 
+resource "oci_identity_policy" "mysql" {
+  count = length(var.db_nsg_ids) > 0 ? 1 : 0
+
+  compartment_id = var.compartment_id
+  name           = "${var.label_prefix}-policy-mysql"
+  description    = "MySQL DB system resource principal: VNIC in the db subnet, member of the db NSGs"
+  statements = [
+    "Allow any-user to {NETWORK_SECURITY_GROUP_UPDATE_MEMBERS} in compartment id ${var.compartment_id} where all {request.principal.type = 'mysqldbsystem', request.resource.compartment.id = '${var.compartment_id}'}",
+    "Allow any-user to {VNIC_CREATE, VNIC_UPDATE, VNIC_ASSOCIATE_NETWORK_SECURITY_GROUP, VNIC_DISASSOCIATE_NETWORK_SECURITY_GROUP} in compartment id ${var.compartment_id} where all {request.principal.type = 'mysqldbsystem', request.resource.compartment.id = '${var.compartment_id}'}",
+  ]
+
+  freeform_tags = var.freeform_tags
+}
+
 resource "oci_mysql_mysql_db_system" "this" {
   compartment_id      = var.compartment_id
   display_name        = "${var.label_prefix}-mysql"
@@ -45,6 +59,8 @@ resource "oci_mysql_mysql_db_system" "this" {
   lifecycle {
     ignore_changes = [admin_password, defined_tags]
   }
+
+  depends_on = [oci_identity_policy.mysql]
 }
 
 resource "oci_network_load_balancer_network_load_balancer" "this" {

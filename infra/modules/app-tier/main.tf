@@ -250,6 +250,12 @@ resource "oci_core_instance_pool" "app" {
   }
 }
 
+locals {
+  pool_filter = "{instancePoolId = \"${oci_core_instance_pool.app["stable"].id}\"}"
+  pool_cpu    = "CpuUtilization[1m]${local.pool_filter}.grouping().mean()"
+  pool_memory = "MemoryUtilization[1m]${local.pool_filter}.grouping().mean()"
+}
+
 resource "oci_autoscaling_auto_scaling_configuration" "app" {
   count = var.autoscaling == null ? 0 : 1
 
@@ -265,7 +271,7 @@ resource "oci_autoscaling_auto_scaling_configuration" "app" {
   }
 
   policies {
-    display_name = "cpu"
+    display_name = "cpu-memory"
     policy_type  = "threshold"
 
     capacity {
@@ -283,13 +289,11 @@ resource "oci_autoscaling_auto_scaling_configuration" "app" {
       }
 
       metric {
-        metric_type      = "CPU_UTILIZATION"
-        pending_duration = var.autoscaling.pending_duration
-
-        threshold {
-          operator = "GT"
-          value    = var.autoscaling.scale_out_cpu
-        }
+        metric_source         = "CUSTOM_QUERY"
+        namespace             = "oci_computeagent"
+        metric_compartment_id = var.compartment_id
+        pending_duration      = var.autoscaling.pending_duration
+        query                 = "${local.pool_cpu} > ${var.autoscaling.scale_out_cpu} || ${local.pool_memory} > ${var.autoscaling.scale_out_memory}"
       }
     }
 
@@ -302,13 +306,11 @@ resource "oci_autoscaling_auto_scaling_configuration" "app" {
       }
 
       metric {
-        metric_type      = "CPU_UTILIZATION"
-        pending_duration = var.autoscaling.pending_duration
-
-        threshold {
-          operator = "LT"
-          value    = var.autoscaling.scale_in_cpu
-        }
+        metric_source         = "CUSTOM_QUERY"
+        namespace             = "oci_computeagent"
+        metric_compartment_id = var.compartment_id
+        pending_duration      = var.autoscaling.pending_duration
+        query                 = "${local.pool_cpu} < ${var.autoscaling.scale_in_cpu} && ${local.pool_memory} < ${var.autoscaling.scale_in_memory}"
       }
     }
   }

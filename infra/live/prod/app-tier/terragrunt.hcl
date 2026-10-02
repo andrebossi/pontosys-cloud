@@ -74,6 +74,8 @@ inputs = {
     step                 = 1
     scale_out_cpu        = 70
     scale_in_cpu         = 25
+    scale_out_memory     = 80
+    scale_in_memory      = 60
     pending_duration     = "PT5M"
   }
 

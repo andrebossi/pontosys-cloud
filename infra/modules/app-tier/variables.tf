@@ -159,13 +159,15 @@ variable "freeform_tags" {
 }
 
 variable "autoscaling" {
-  description = "Scales the stable pool on CPU. Null disables it and the pool stays at pool_min_size."
+  description = "Scales the stable pool on CPU or memory: out when either average crosses its scale_out_*, in only when both are below their scale_in_*. Null disables it and the pool stays at pool_min_size."
   type = object({
     is_enabled           = optional(bool, true)
     cool_down_in_seconds = optional(number, 300)
     step                 = optional(number, 1)
     scale_out_cpu        = optional(number, 70)
     scale_in_cpu         = optional(number, 25)
+    scale_out_memory     = optional(number, 80)
+    scale_in_memory      = optional(number, 60)
     pending_duration     = optional(string, "PT5M")
   })
   default = null

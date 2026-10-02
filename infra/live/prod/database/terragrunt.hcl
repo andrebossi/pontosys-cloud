@@ -35,6 +35,7 @@ inputs = {
 
   label_prefix = local.env.prefix
 
+  mysql_version           = "8.4.11"
   shape_name              = "MySQL.2"
   data_storage_size_in_gb = 50
   is_highly_available     = false

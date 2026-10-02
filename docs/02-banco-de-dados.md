@@ -1,7 +1,7 @@
 # 02 — Banco de dados
 
-MySQL HeatWave privado (`pscloudmysql.db.vcn.oraclevcn.com:3306`), shape
-`MySQL.2`, 50 GB, backup diário com PITR (7 dias). Quem alcança a porta 3306:
+MySQL HeatWave 8.4.11 LTS privado (`pscloudmysql.db.vcn.oraclevcn.com:3306`),
+shape `MySQL.2`, 50 GB, backup diário com PITR (7 dias). Quem alcança a porta 3306:
 as máquinas das apps e o monitoring.
 
 ## Como as apps usam o banco
@@ -39,6 +39,23 @@ O que precisa bater no novo:
 Valores diferentes do padrão da OCI vão numa *MySQL configuration* aplicada ao
 DB system (`infra/modules/database`) **antes** do `terragrunt apply`.
 
+Sem acesso ao servidor antigo, o ponto de partida é o parameter group padrão do
+RDS MySQL 8.0, que já bate com o padrão da OCI 8.4 (por isso o módulo não cria
+configuration própria):
+
+| Variável | RDS 8.0 padrão | OCI 8.4 padrão | Configurável na OCI |
+|---|---|---|---|
+| `lower_case_table_names` | 0 | `CASE_SENSITIVE` (0) | só na criação |
+| `sql_mode` | padrão do MySQL 8 | padrão do MySQL 8 | sim |
+| `time_zone` | UTC | UTC | sim |
+| `require_secure_transport` | OFF | OFF | sim |
+| `character_set_server` / `collation_server` | utf8mb4 / utf8mb4_0900_ai_ci | idem | sim |
+| `log_bin_trust_function_creators` | 0 | — | **não** |
+| plugin de autenticação | `mysql_native_password` | `caching_sha2_password` | **não** (8.4 ignora `default_authentication_plugin`) |
+
+As duas últimas linhas são as que podem quebrar algo; confira logo depois de
+criar (seções 5 e 7).
+
 ## 2. Criar
 
 ```sh
@@ -73,7 +90,7 @@ zcat dump.sql.gz | mysql -h "$DBH" -P "$DBP" -u "$DBU"
 > `mysql ... -p`.
 
 Confira que veio a tabela `__EFMigrationsHistory` (a `monitorclientesapi` usa
-EF migrations e as contas das apps não têm `CREATE`).
+EF migrations).
 
 ## 4. Acertar o registro de clientes
 
