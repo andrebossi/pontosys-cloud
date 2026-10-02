@@ -70,6 +70,7 @@ inputs = {
 
   autoscaling = {
     is_enabled           = true
+    metric               = "CPU_UTILIZATION"
     cool_down_in_seconds = 300
     step                 = 1
     scale_out_cpu        = 70

@@ -159,9 +159,10 @@ variable "freeform_tags" {
 }
 
 variable "autoscaling" {
-  description = "Scales the stable pool on CPU or memory: out when either average crosses its scale_out_*, in only when both are below their scale_in_*. Null disables it and the pool stays at pool_min_size."
+  description = "Scales the stable pool on one Compute Agent metric (CPU_UTILIZATION or MEMORY_UTILIZATION), using that metric's scale_out_*/scale_in_* thresholds. Null disables it and the pool stays at pool_min_size."
   type = object({
     is_enabled           = optional(bool, true)
+    metric               = optional(string, "CPU_UTILIZATION")
     cool_down_in_seconds = optional(number, 300)
     step                 = optional(number, 1)
     scale_out_cpu        = optional(number, 70)
@@ -171,4 +172,9 @@ variable "autoscaling" {
     pending_duration     = optional(string, "PT5M")
   })
   default = null
+
+  validation {
+    condition     = var.autoscaling == null || contains(["CPU_UTILIZATION", "MEMORY_UTILIZATION"], try(var.autoscaling.metric, ""))
+    error_message = "autoscaling.metric must be CPU_UTILIZATION or MEMORY_UTILIZATION."
+  }
 }

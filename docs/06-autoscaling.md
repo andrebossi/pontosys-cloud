@@ -8,8 +8,9 @@ balancer `pscloud-lb` (`144.22.172.90`, porta 80).
 | Máquina | `VM.Standard.E4.Flex`, 1 OCPU, 6 GB |
 | Pool stable | mínimo 1, máximo 2, nos 3 fault domains |
 | Pool canary | 0 (só sobe com `canary.yml action=up`) |
-| Escala para cima | CPU média > 70% **ou** memória média > 80% por 5 min |
-| Escala para baixo | CPU média < 25% **e** memória média < 60% por 5 min |
+| Métrica | `CPU_UTILIZATION` (ou `MEMORY_UTILIZATION`, em `autoscaling.metric`) |
+| Escala para cima | CPU média > 70% por 5 min (memória: > 80%) |
+| Escala para baixo | CPU média < 25% por 5 min (memória: < 60%) |
 | Espera entre escalas | 5 min |
 | Drenagem ao remover | 120 s |
 
@@ -45,11 +46,10 @@ Edite `pool_min_size`, `pool_max_size` ou `autoscaling` em
 cd infra/live/prod/app-tier && terragrunt apply
 ```
 
-As médias são de todas as máquinas do pool stable (métricas `oci_computeagent`
-filtradas por `instancePoolId`). Memória não cai quando entra uma máquina nova
-como a CPU cai: cada máquina roda todas as apps. Com as apps no ar, olhe a
-memória de uma máquina sem carga e deixe `scale_in_memory` acima dela, senão o
-pool nunca volta ao mínimo.
+A OCI usa uma métrica só por pool. Ao trocar para memória: ela não cai quando
+entra uma máquina nova como a CPU cai (cada máquina roda todas as apps). Com as
+apps no ar, olhe a memória de uma máquina sem carga e deixe `scale_in_memory`
+acima dela, senão o pool nunca volta ao mínimo.
 
 Escalar na mão (sem esperar CPU ou memória): mude `pool_min_size` ou use o console
 (*Instance pools → pscloud-pool-stable → Edit size*).
